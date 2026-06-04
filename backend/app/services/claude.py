@@ -1,0 +1,99 @@
+import json
+from typing import Any
+from anthropic import Anthropic
+from app import config
+
+SYSTEM_PROMPT = """당신은 회의록 정리 전문가입니다.
+주어진 회의 음성 전사본(타임스탬프 포함)을 분석해서 구조화된 회의록 JSON을 생성합니다.
+
+반드시 다음 JSON 스키마로만 응답하세요. 다른 텍스트는 절대 포함하지 마세요:
+
+{
+  "title": "회의 주제를 한 줄로 요약 (예: '2026 Q2 마케팅 전략 킥오프')",
+  "summary": "회의 전체를 3~5문장으로 요약",
+  "attendees": ["참석자1", "참석자2"],
+  "agenda": ["다룬 안건1", "다룬 안건2"],
+  "key_points": [
+    "핵심 논의사항 1 (구체적으로)",
+    "핵심 논의사항 2"
+  ],
+  "decisions": [
+    "결정된 사항 1",
+    "결정된 사항 2"
+  ],
+  "action_items": [
+    {"task": "할 일 내용", "owner": "담당자 (불명확하면 미정)", "due": "기한 (없으면 미정)"}
+  ],
+  "open_questions": [
+    "결론 안 난 이슈나 추가 논의 필요 사항"
+  ]
+}
+
+규칙:
+- 참석자 이름이 transcript에서 명확하지 않으면 빈 배열 반환
+- 추측하지 말고 transcript에 있는 내용만 사용
+- 한국어로 작성
+- key_points와 decisions는 명확히 구분 (논의 vs 합의)
+"""
+
+EMPTY_NOTES = {
+    "title": "회의록",
+    "summary": "요약을 생성하지 못했습니다.",
+    "attendees": [],
+    "agenda": [],
+    "key_points": [],
+    "decisions": [],
+    "action_items": [],
+    "open_questions": [],
+}
+
+
+def _json_from_text(text: str) -> dict[str, Any]:
+    stripped = text.strip()
+    if stripped.startswith("```"):
+        stripped = stripped.strip("`")
+        if stripped.lower().startswith("json"):
+            stripped = stripped[4:].strip()
+    return json.loads(stripped)
+
+
+def summarize_transcript(transcript: str, meeting_title: str = "", participants: list[str] | None = None) -> dict[str, Any]:
+    if not config.ANTHROPIC_API_KEY:
+        notes = dict(EMPTY_NOTES)
+        notes["title"] = meeting_title or "회의록"
+        notes["summary"] = "ANTHROPIC_API_KEY가 설정되지 않아 샘플 요약으로 저장되었습니다."
+        notes["attendees"] = participants or []
+        notes["key_points"] = ["전사본은 생성되었지만 Claude 요약 API 키가 없어 구조화 요약을 생성하지 못했습니다."]
+        return notes
+
+    client = Anthropic(api_key=config.ANTHROPIC_API_KEY)
+    user_prompt = f"""
+회의 제목 후보: {meeting_title or "없음"}
+사용자가 UI에서 명시 입력한 참석자 목록: {", ".join(participants or []) or "없음"}
+
+참석자 목록이 제공된 경우 transcript에 직접 언급되지 않아도 회의 메타데이터로 간주하여 attendees에 반드시 포함하세요.
+아래 전사본을 분석해서 지정된 JSON 스키마로만 응답하세요.
+
+전사본:
+{transcript}
+"""
+    message = client.messages.create(
+        model=config.CLAUDE_MODEL,
+        max_tokens=config.CLAUDE_MAX_TOKENS,
+        system=SYSTEM_PROMPT,
+        messages=[{"role": "user", "content": user_prompt}],
+    )
+    text = "".join(block.text for block in message.content if getattr(block, "type", None) == "text")
+    notes = _json_from_text(text)
+
+    if meeting_title and (not notes.get("title") or notes.get("title") == "회의록"):
+        notes["title"] = meeting_title
+    if participants:
+        existing_attendees = notes.get("attendees") or []
+        merged_attendees = []
+        for name in [*participants, *existing_attendees]:
+            value = str(name).strip()
+            if value and value not in merged_attendees:
+                merged_attendees.append(value)
+        notes["attendees"] = merged_attendees
+    return notes

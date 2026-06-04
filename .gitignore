@@ -1,0 +1,69 @@
+# =========================
+# Secrets / environment
+# =========================
+.env
+.env.*
+!.env.example
+
+# =========================
+# Python
+# =========================
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+
+# =========================
+# Frontend / Node
+# =========================
+node_modules/
+dist/
+build/
+.vite/
+
+# =========================
+# Meeting app generated data
+# =========================
+backend/app/storage/
+backend/app/recordings/
+backend/app/outputs/
+backend/app/uploads/
+recordings/
+outputs/
+uploads/
+storage/
+temp/
+tmp/
+
+*.webm
+*.wav
+*.mp3
+*.m4a
+*.mp4
+*.ogg
+*.flac
+
+# =========================
+# Logs
+# =========================
+*.log
+logs/
+
+# =========================
+# OS / editor
+# =========================
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# =========================
+# Docker / cache
+# =========================
+docker-data/
+.cache/
