@@ -1,5 +1,8 @@
 # LIKE meeting assistant
 
+<img width="1172" height="1128" alt="image" src="https://github.com/user-attachments/assets/c9ae9d93-b97a-4ba3-b010-e24f5e16d953" />
+
+
 기존 `meeting-notes` 로컬 CLI 흐름을 웹 UI + Docker 형태로 확장한 버전입니다.
 
 핵심 흐름은 다음과 같습니다.
