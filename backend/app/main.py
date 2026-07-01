@@ -1,5 +1,6 @@
 import json
 import shutil
+from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -12,9 +13,22 @@ from app import config
 from app.services.claude import summarize_transcript
 from app.services.emailer import send_meeting_email
 from app.services.notion import upload as upload_to_notion
-from app.services.stt import transcribe_audio
+from app.services.stt import preload_model, transcribe_audio
 
-app = FastAPI(title="LIKE meeting assistant")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Whisper 모델을 미리 로드해 첫 요청 콜드스타트로 인한 nginx 504 를 방지한다.
+    # 로딩에 실패해도(예: GPU 미탑재) 앱은 뜨게 두고, 요청 시 다시 시도한다.
+    try:
+        preload_model()
+        print("[startup] Whisper model preloaded.")
+    except Exception as exc:  # noqa: BLE001
+        print(f"[startup] Whisper preload failed (will retry on first request): {exc}")
+    yield
+
+
+app = FastAPI(title="LIKE meeting assistant", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,

@@ -15,6 +15,8 @@ services:
     volumes:
       - ./backend/app/recordings:/app/app/recordings
       - ./backend/app/storage:/app/app/storage
+      # Whisper 모델 캐시 유지 (재빌드/재생성 시 3GB 재다운로드 방지)
+      - whisper-cache:/root/.cache
     deploy:
       resources:
         reservations:
@@ -34,3 +36,6 @@ services:
       - "${FRONTEND_PORT:-5173}:5173"
     depends_on:
       - backend
+
+volumes:
+  whisper-cache:

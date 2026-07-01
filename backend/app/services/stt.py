@@ -17,6 +17,11 @@ def _get_model():
     return _model
 
 
+def preload_model() -> None:
+    """앱 시작 시 모델을 미리 로드해 첫 요청의 콜드스타트 지연(→ 프록시 504)을 방지한다."""
+    _get_model()
+
+
 def transcribe_audio(audio_path: Path) -> str:
     if not audio_path.exists():
         raise FileNotFoundError(str(audio_path))
