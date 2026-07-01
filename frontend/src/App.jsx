@@ -28,7 +28,7 @@ import {
   ExternalLink,
 } from "lucide-react";
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 const DEFAULT_NOTION_LOCATION = "LIKE Meeting Minutes";
 const DEFAULT_NOTION_DESCRIPTION = "기본 회의록 페이지";
 const NEW_LINE = String.fromCharCode(10);
