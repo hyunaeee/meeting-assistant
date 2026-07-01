@@ -19,7 +19,9 @@ app = FastAPI(title="LIKE meeting assistant")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    # allow_credentials=True 와 allow_origins=["*"] 는 CORS 스펙상 함께 쓸 수 없다.
+    # 이 앱은 쿠키/인증을 쓰지 않으므로 credentials 를 끄고 "*" 를 유효하게 둔다.
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
