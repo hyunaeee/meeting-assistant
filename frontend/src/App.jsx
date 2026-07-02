@@ -915,6 +915,11 @@ export default function App() {
                   {recordingState === "paused" && <button className="primary" onClick={resumeRecording}><Play size={18} /> 다시 시작</button>}
                   {(recordingState === "recording" || recordingState === "paused") && <button className="danger" onClick={finishRecording} disabled={isProcessing}><Square size={18} /> 종료하고 회의록 만들기</button>}
                   {recordingState === "finished" && <button className="secondary" onClick={resetMeeting}><RotateCcw size={18} /> 새 회의 시작</button>}
+                  {recordingState !== "recording" && recordingState !== "paused" && (!selectedDepartment || !registrant.trim()) && (
+                    <p className="help" style={{ flexBasis: "100%", margin: 0, color: "var(--accent-strong)", fontWeight: 600 }}>
+                      회의록을 시작하려면 <b>회의 설정</b>에서 <b>부서</b>와 <b>등록자</b>를 먼저 입력하세요.
+                    </p>
+                  )}
                 </div>
               </div>
             </div>
