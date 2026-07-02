@@ -219,6 +219,19 @@ select.input { appearance: none; -webkit-appearance: none; cursor: pointer; padd
 .process-log-row.error { color: #b91c1c; }
 .result-email-box { margin-top: 14px; border: 1px solid var(--border); background: var(--surface-2); border-radius: var(--r-md); padding: 14px; }
 
+/* 화자 매칭 + 전사 스크롤 */
+.speaker-map { border: 1px solid var(--border); background: var(--surface-2); border-radius: var(--r-md); padding: 14px; margin-bottom: 14px; }
+.speaker-map-title { margin: 0 0 10px; font-size: 13px; font-weight: 700; color: var(--foreground); }
+.speaker-map-hint { color: var(--muted); font-weight: 500; font-size: 12px; }
+.speaker-map-row { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+.speaker-map-arrow { color: var(--muted); flex: none; }
+.speaker-map-input { height: 40px; flex: 1; box-shadow: none; }
+.transcript-scroll { max-height: 460px; overflow-y: auto; display: grid; gap: 12px; padding-right: 6px; }
+.transcript-scroll::-webkit-scrollbar { width: 8px; }
+.transcript-scroll::-webkit-scrollbar-thumb { background: #d8dce4; border-radius: 999px; }
+.transcript-scroll::-webkit-scrollbar-track { background: transparent; }
+@media (max-width: 640px) { .transcript-scroll { max-height: 340px; } }
+
 /* ───────────────────────── Responsive ───────────────────────── */
 /* Tablet: single column */
 @media (max-width: 980px) {

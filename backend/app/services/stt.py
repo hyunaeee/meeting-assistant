@@ -22,7 +22,10 @@ def preload_model() -> None:
     _get_model()
 
 
-def transcribe_audio(audio_path: Path) -> str:
+def transcribe_segments(audio_path: Path):
+    """전사 세그먼트 목록과 변환된 wav 경로를 반환한다.
+    segments = [{"start": float, "end": float, "text": str}] (시간순)
+    """
     if not audio_path.exists():
         raise FileNotFoundError(str(audio_path))
 
@@ -39,18 +42,31 @@ def transcribe_audio(audio_path: Path) -> str:
         beam_size=5,
     )
 
-    lines = []
+    out = []
     for segment in segments:
-        start = _format_time(segment.start)
-        end = _format_time(segment.end)
         text = segment.text.strip()
         if text:
-            lines.append(f"[{start} - {end}] {text}")
+            out.append({"start": float(segment.start), "end": float(segment.end), "text": text})
 
-    if not lines:
+    if not out:
         raise RuntimeError("전사 결과가 비어 있습니다. 오디오가 무음이었거나 온라인 회의 오디오 공유가 정상적으로 녹음되지 않았을 수 있습니다.")
 
+    return out, wav_path
+
+
+def segments_to_text(segments: list[dict]) -> str:
+    """세그먼트 목록을 전사본 문자열로 변환한다. speaker가 있으면 앞에 붙인다."""
+    lines = []
+    for s in segments:
+        speaker = s.get("speaker") or ""
+        prefix = f"[{speaker}] " if speaker else ""
+        lines.append(f"{prefix}[{_format_time(s['start'])} - {_format_time(s['end'])}] {s['text']}")
     return "\n".join(lines)
+
+
+def transcribe_audio(audio_path: Path) -> str:
+    segments, _wav = transcribe_segments(audio_path)
+    return segments_to_text(segments)
 
 
 def _convert_to_wav(audio_path: Path) -> Path:

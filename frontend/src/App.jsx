@@ -29,7 +29,7 @@ import {
 } from "lucide-react";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
-const DEFAULT_NOTION_LOCATION = "LIKE Meeting Minutes";
+const DEFAULT_NOTION_LOCATION = "LIKE Notion AI 회의록";
 const DEFAULT_NOTION_DESCRIPTION = "기본 회의록 페이지";
 const NEW_LINE = String.fromCharCode(10);
 const CARRIAGE_RETURN = String.fromCharCode(13);
@@ -189,9 +189,6 @@ export default function App() {
   const displayParticipants = participants.length ? participants.join(", ") : "참가자 미지정";
   const displayDuration = formatDuration(meetingDurationSeconds || result?.duration_seconds || 0);
   const notes = result?.notes;
-  const transcriptItems = result?.transcript
-    ? result.transcript.split("\n").filter(Boolean).slice(0, 8).map((line, index) => ({ speaker: "전사 " + (index + 1), text: line }))
-    : sampleTranscript;
 
   const addParticipant = () => {
     const next = parseParticipantInput(participantInput);
@@ -925,7 +922,7 @@ export default function App() {
 
           {step === "setup" && <EmptyState />}
           {step === "recording" && <ProgressPanel recordingState={recordingState} />}
-          {step === "result" && <ResultPanel result={result} notes={notes} transcriptItems={transcriptItems} emails={emails} error={error} isProcessing={isProcessing} processingLogs={processingLogs} durationLabel={displayDuration} onSendEmail={sendEmailAfterMeeting} isSendingEmail={isSendingEmail} manualEmailStatus={manualEmailStatus} />}
+          {step === "result" && <ResultPanel result={result} notes={notes} participants={participants} emails={emails} error={error} isProcessing={isProcessing} processingLogs={processingLogs} durationLabel={displayDuration} onSendEmail={sendEmailAfterMeeting} isSendingEmail={isSendingEmail} manualEmailStatus={manualEmailStatus} />}
         </section>
       </section>
     </main>
@@ -1023,14 +1020,40 @@ function ProcessingLog({ logs }) {
   </div>;
 }
 
-function ResultPanel({ result, notes, transcriptItems, emails, error, isProcessing, processingLogs, durationLabel, onSendEmail, isSendingEmail, manualEmailStatus }) {
+function ResultPanel({ result, notes, participants, emails, error, isProcessing, processingLogs, durationLabel, onSendEmail, isSendingEmail, manualEmailStatus }) {
   const [emailComposerOpen, setEmailComposerOpen] = useState(false);
   const [resultEmailInput, setResultEmailInput] = useState("");
   const [resultEmails, setResultEmails] = useState(emails || []);
+  const [speakerMap, setSpeakerMap] = useState({});
 
   useEffect(() => {
     setResultEmails(emails || []);
   }, [emails]);
+
+  // 새 결과가 오면 화자 매칭 초기화
+  useEffect(() => {
+    setSpeakerMap({});
+  }, [result?.meeting_id]);
+
+  const segments = Array.isArray(result?.segments) ? result.segments : [];
+  // 등장 순서대로 고유 화자 목록
+  const speakers = [];
+  for (const s of segments) {
+    if (s.speaker && !speakers.includes(s.speaker)) speakers.push(s.speaker);
+  }
+  const nameFor = (sp) => (speakerMap[sp] && speakerMap[sp].trim()) || sp;
+
+  // 같은 화자의 연속 발화를 하나의 턴으로 묶기
+  const turns = [];
+  for (const s of segments) {
+    const last = turns[turns.length - 1];
+    if (last && last.speaker === s.speaker) last.texts.push(s.text);
+    else turns.push({ speaker: s.speaker || "", texts: [s.text] });
+  }
+  // segments가 없을 때(전사 실패 등)의 폴백: 전사본 텍스트를 줄단위로
+  const fallbackLines = (!segments.length && result?.transcript)
+    ? result.transcript.split("\n").filter(Boolean)
+    : [];
 
   const addResultEmail = () => {
     const next = parseEmailInput(resultEmailInput);
@@ -1081,7 +1104,41 @@ function ResultPanel({ result, notes, transcriptItems, emails, error, isProcessi
       {error && <div className="error">{error}</div>}
     </div></div>
 
-    <div className="stack"><div className="card"><div className="card-inner"><div className="section-title"><h3>전사 미리보기</h3><FileText size={24} color="#64748b" /></div>{transcriptItems.map((item) => <div key={item.speaker} className="transcript-item"><span className="speaker">{item.speaker}</span><p className="help">{item.text}</p></div>)}</div></div>
+    <div className="stack"><div className="card"><div className="card-inner"><div className="section-title"><h3>전사 미리보기</h3><FileText size={24} color="#64748b" /></div>
+      {speakers.length > 0 && (
+        <div className="speaker-map">
+          <p className="speaker-map-title">화자 매칭 <span className="speaker-map-hint">(원하면 참가자로 지정)</span></p>
+          <datalist id="participant-options">{(participants || []).map((p) => <option key={p} value={p} />)}</datalist>
+          {speakers.map((sp) => (
+            <div key={sp} className="speaker-map-row">
+              <span className="speaker">{sp}</span>
+              <span className="speaker-map-arrow">→</span>
+              <input
+                className="input speaker-map-input"
+                list="participant-options"
+                placeholder={"그대로 (" + sp + ")"}
+                value={speakerMap[sp] || ""}
+                onChange={(e) => setSpeakerMap((m) => ({ ...m, [sp]: e.target.value }))}
+              />
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="transcript-scroll">
+        {turns.length > 0
+          ? turns.map((t, idx) => (
+              <div key={idx} className="transcript-item">
+                {t.speaker && <span className="speaker">{nameFor(t.speaker)}</span>}
+                <p className="help">{t.texts.join(" ")}</p>
+              </div>
+            ))
+          : fallbackLines.length > 0
+            ? fallbackLines.map((line, idx) => (
+                <div key={idx} className="transcript-item"><p className="help">{line}</p></div>
+              ))
+            : <p className="help">전사 내용이 아직 없습니다.</p>}
+      </div>
+    </div></div>
     <div className="card"><div className="card-inner"><h3 className="h2" style={{ fontSize: 22, marginBottom: 16 }}>최종 처리</h3><button className="final-btn" disabled><Save size={18} /> Notion 자동 저장</button><button className="outline-btn" disabled={!notes || isProcessing || isSendingEmail} onClick={sendResultEmail}><Send size={18} /> {isSendingEmail ? "이메일 보내는 중" : emailComposerOpen ? "입력한 이메일로 보내기" : "이메일 보내기"}{emailComposerOpen && resultEmails.length ? " (" + resultEmails.length + "명)" : ""}</button><p className="notice">Notion 업로드가 끝난 뒤에도 원하면 이메일을 보낼 수 있습니다. 이메일을 입력하고 바로 보내기를 눌러도 입력 중인 주소까지 함께 발송됩니다.</p>
       {emailComposerOpen && <div className="result-email-box"><div className="input-row"><input className="input" value={resultEmailInput} onChange={(e) => setResultEmailInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addResultEmail(); } }} placeholder="이메일 입력 후 Enter 또는 추가" /><button className="add-btn" type="button" onClick={addResultEmail}><Plus size={20} /></button></div><TagList items={resultEmails} onRemove={removeResultEmail} variant="dark" />{!resultEmails.length && <p className="help">여러 명에게 보내려면 쉼표, 세미콜론, 줄바꿈 또는 Enter로 구분하세요.</p>}</div>}
       {manualEmailStatus && <div className={manualEmailStatus.includes("완료") ? "success" : manualEmailStatus.includes("오류") || manualEmailStatus.includes("실패") ? "error" : "notice"}>{manualEmailStatus}</div>}</div></div></div>

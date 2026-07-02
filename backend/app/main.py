@@ -16,18 +16,24 @@ from app import config
 from app.services.claude import summarize_transcript
 from app.services.emailer import send_meeting_email
 from app.services.notion import upload as upload_to_notion
-from app.services.stt import preload_model, transcribe_audio
+from app.services import diarize as diarize_svc
+from app.services.stt import preload_model, segments_to_text, transcribe_segments
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Whisper 모델을 미리 로드해 첫 요청 콜드스타트로 인한 nginx 504 를 방지한다.
-    # 로딩에 실패해도(예: GPU 미탑재) 앱은 뜨게 두고, 요청 시 다시 시도한다.
+    # 무거운 모델을 미리 로드해 첫 요청 콜드스타트로 인한 nginx 504 를 방지한다.
+    # 로딩에 실패해도(예: GPU 미탑재/모델 약관 미동의) 앱은 뜨게 두고 요청 시 재시도한다.
     try:
         preload_model()
         print("[startup] Whisper model preloaded.")
     except Exception as exc:  # noqa: BLE001
         print(f"[startup] Whisper preload failed (will retry on first request): {exc}")
+    try:
+        diarize_svc.preload_pipeline()
+        print("[startup] Diarization pipeline preloaded.")
+    except Exception as exc:  # noqa: BLE001
+        print(f"[startup] Diarization preload failed (will fall back to no speakers): {exc}")
     yield
 
 
@@ -67,10 +73,19 @@ def _run_meeting_job(
     upload_date: str = "",
 ) -> None:
     try:
+        segments: list[dict] = []
         with _transcribe_lock:
             try:
-                transcript = transcribe_audio(audio_path)
+                segments, wav_path = transcribe_segments(audio_path)
+                # 화자 분리(실패해도 화자 없이 진행)
+                try:
+                    turns = diarize_svc.diarize(wav_path)
+                    segments = diarize_svc.assign_speakers(segments, turns)
+                except Exception as exc:  # noqa: BLE001
+                    print(f"[diarize] 화자 분리 실패, 화자 없이 진행: {exc}")
+                transcript = segments_to_text(segments)
             except Exception as exc:  # noqa: BLE001
+                segments = []
                 transcript = f"[00:00:00 - 00:00:01] 전사 처리 실패: {exc}"
 
         notes = summarize_transcript(
@@ -93,6 +108,7 @@ def _run_meeting_job(
         result = {
             "meeting_id": meeting_id,
             "transcript": transcript,
+            "segments": segments,
             "notes": notes,
             "notion_url": notion_url,
             "notion_error": notion_error,
