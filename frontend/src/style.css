@@ -179,7 +179,89 @@ select.input { appearance: none; -webkit-appearance: none; cursor: pointer; padd
 .success { background: oklch(96% 0.05 162.5); color: oklch(45% 0.12 162.5); border:1px solid oklch(88% 0.09 162.5); padding:12px 14px; border-radius: var(--r-sm); font-size:13px; font-weight:700; line-height:1.5; margin-top:14px; }
 .error { background: oklch(96% 0.04 25); color: oklch(50% 0.18 25); border:1px solid oklch(88% 0.08 25); padding:12px 14px; border-radius: var(--r-sm); font-size:13px; font-weight:700; line-height:1.5; margin-top:14px; }
 .file-input { display:none; }
-@media (max-width: 980px) { .container, .result-grid { grid-template-columns: 1fr; } .steps { display:none; } .hero-title { font-size: 38px; } .source-grid { grid-template-columns:1fr; } }
+/* Tablet: single column */
+@media (max-width: 980px) {
+  .container, .result-grid { grid-template-columns: 1fr; }
+  .steps { display: none; }
+  .hero-title { font-size: 40px; }
+}
+
+/* Phone: compact so everything fits at a glance */
+@media (max-width: 640px) {
+  .blur-a { width: 220px; height: 220px; }
+  .blur-b { width: 280px; height: 280px; }
+  .blur-c { width: 240px; height: 240px; opacity: .5; }
+
+  .header-inner { padding: 10px 14px; }
+  .logo { gap: 10px; }
+  .logo-icon { width: 36px; height: 36px; border-radius: 12px; }
+  .logo-title { font-size: 15px; }
+  .logo-sub { font-size: 11px; }
+
+  .container { padding: 14px 12px; gap: 14px; }
+  .stack, .result-grid { gap: 14px; }
+
+  .card { border-radius: 20px; }
+  .card-inner { padding: 16px; }
+  .card-head { margin-bottom: 16px; gap: 12px; }
+  .icon-box { width: 40px; height: 40px; border-radius: 12px; }
+  .badge { margin-bottom: 6px; padding: 4px 10px; }
+  .h2 { font-size: 20px; }
+  .help { font-size: 13px; }
+
+  .field { margin-bottom: 14px; gap: 6px; }
+  .label { font-size: 13px; }
+  .input { height: 44px; border-radius: 12px; }
+  .add-btn { height: 44px; width: 44px; border-radius: 12px; }
+  .notion-box, .summary-item { padding: 12px; border-radius: 14px; }
+
+  /* Hero */
+  .hero-card { border-radius: 22px; }
+  .hero-inner { padding: 18px; }
+  .hero-top { margin-bottom: 16px; gap: 12px; }
+  .status-pill { font-size: 12px; padding: 6px 10px; }
+  .hero-title { font-size: 28px; margin-top: 12px; }
+  .hero-title.placeholder { font-size: 20px; }
+  .hero-participants { font-size: 12px; margin-top: 10px; }
+  .audio-icon { width: 56px; height: 56px; border-radius: 18px; }
+
+  /* Source buttons stay 2-up but compact */
+  .source-grid { grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 16px; }
+  .source-btn { padding: 14px; border-radius: 16px; }
+  .source-icon { width: 36px; height: 36px; margin-bottom: 10px; }
+  .source-title { font-size: 14px; }
+  .source-desc { font-size: 12px; line-height: 1.4; }
+
+  /* Record / tester */
+  .record-panel, .audio-tester { padding: 16px; border-radius: 18px; margin-bottom: 16px; }
+  .record-head { margin-bottom: 14px; }
+  .record-status { font-size: 20px; }
+  .tester-head { margin-bottom: 12px; }
+  .tester-head h3 { font-size: 17px; }
+  .wave-bars { height: 44px; gap: 5px; }
+  .wave-bars span { width: 6px; }
+
+  /* Actions: full-width, easy to tap */
+  .actions { gap: 10px; }
+  .actions > .primary, .actions > .secondary, .actions > .danger { flex: 1 1 100%; justify-content: center; padding: 13px 18px; }
+  .tester-actions > .tester-btn, .tester-actions > .tester-stop { flex: 1 1 auto; text-align: center; }
+
+  /* Result */
+  .section-title { margin-bottom: 14px; gap: 12px; }
+  .section-title h3 { font-size: 18px; }
+  .note-block, .transcript-item { padding: 14px; border-radius: 16px; }
+  .final-btn, .outline-btn { height: 46px; }
+}
+
+/* Small phones */
+@media (max-width: 380px) {
+  .container { padding: 12px 10px; }
+  .card-inner { padding: 14px; }
+  .hero-inner { padding: 15px; }
+  .hero-title { font-size: 25px; }
+  .source-title { font-size: 13px; }
+  .source-desc { display: none; }
+}
 
 /* Audio tester */
 .audio-tester { border: 1px solid oklch(100% 0 0 / .1); background: oklch(100% 0 0 / .08); border-radius: var(--r-xl); padding: 20px; margin-bottom: 20px; backdrop-filter: blur(16px); transition: .2s; }
