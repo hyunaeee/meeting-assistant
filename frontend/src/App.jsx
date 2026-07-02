@@ -787,7 +787,7 @@ export default function App() {
               </div>
 
               <div className="field">
-                <FieldLabel title="부서" />
+                <FieldLabel title="부서" required />
                 <select
                   className="input"
                   value={selectedDepartment}
@@ -801,7 +801,7 @@ export default function App() {
               </div>
 
               <div className="field">
-                <FieldLabel title="등록자" />
+                <FieldLabel title="등록자" required />
                 <input
                   className="input"
                   value={registrant}
@@ -938,8 +938,8 @@ function StepPill({ active, done, label }) {
   return <div className={"step-pill " + (active ? "active" : done ? "done" : "")}>{label}</div>;
 }
 
-function FieldLabel({ title, optional = false }) {
-  return <label className="label">{title}{optional && <span className="optional">선택</span>}</label>;
+function FieldLabel({ title, optional = false, required = false }) {
+  return <label className="label">{title}{required && <span className="required">필수</span>}{optional && <span className="optional">선택</span>}</label>;
 }
 
 function TagList({ items, onRemove, variant }) {
