@@ -184,17 +184,27 @@ def _build_blocks(notes: dict[str, Any], transcript: str = "") -> list[dict[str,
     return blocks or [_para("회의록 내용이 없습니다.")]
 
 
-def upload(notes: dict[str, Any], transcript: str = "") -> str:
+def upload(
+    notes: dict[str, Any],
+    transcript: str = "",
+    database_id: str = "",
+    page_id: str = "",
+) -> str:
+    # 대상 미지정 시 기존 .env 기본값을 사용한다(하위호환).
+    if not database_id and not page_id:
+        database_id = config.NOTION_DATABASE_ID
+        page_id = config.NOTION_PAGE_ID
+
     title = notes.get("title") or f"회의록 {datetime.now().strftime('%Y-%m-%d %H:%M')}"
     blocks = _build_blocks(notes, transcript)
 
-    if config.NOTION_DATABASE_ID:
-        ds_id, title_prop = _get_data_source_id(config.NOTION_DATABASE_ID)
+    if database_id:
+        ds_id, title_prop = _get_data_source_id(database_id)
         page = _create_database_page(ds_id, title_prop, title, blocks[:100])
-    elif config.NOTION_PAGE_ID:
-        page = _create_child_page(config.NOTION_PAGE_ID, title, blocks[:100])
+    elif page_id:
+        page = _create_child_page(page_id, title, blocks[:100])
     else:
-        raise RuntimeError("NOTION_DATABASE_ID 또는 NOTION_PAGE_ID가 .env에 없습니다.")
+        raise RuntimeError("저장할 Notion 대상(database_id/page_id)이 없습니다.")
 
     page_id = page["id"]
     if len(blocks) > 100:

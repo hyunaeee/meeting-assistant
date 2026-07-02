@@ -62,6 +62,8 @@ def _run_meeting_job(
     email_list: list[str],
     duration_seconds: float,
     meeting_id: str,
+    notion_database_id: str = "",
+    notion_page_id: str = "",
 ) -> None:
     try:
         with _transcribe_lock:
@@ -77,7 +79,12 @@ def _run_meeting_job(
         notion_url = ""
         notion_error = ""
         try:
-            notion_url = upload_to_notion(notes, transcript)
+            notion_url = upload_to_notion(
+                notes,
+                transcript,
+                database_id=notion_database_id,
+                page_id=notion_page_id,
+            )
         except Exception as exc:  # noqa: BLE001
             notion_error = str(exc)
 
@@ -113,6 +120,13 @@ class SendEmailPayload(BaseModel):
     notion_url: Optional[str] = ""
 
 
+def _find_notion_target(key: str) -> Optional[dict]:
+    for target in config.NOTION_TARGETS:
+        if target["key"] == key:
+            return target
+    return None
+
+
 @app.get("/health")
 def health():
     return {
@@ -120,8 +134,19 @@ def health():
         "notion_location": config.NOTION_DEFAULT_LOCATION,
         "notion_page_configured": bool(config.NOTION_PAGE_ID),
         "notion_database_configured": bool(config.NOTION_DATABASE_ID),
+        "notion_targets": len(config.NOTION_TARGETS),
         "claude_configured": bool(config.ANTHROPIC_API_KEY),
         "smtp_configured": bool(config.SMTP_USER and config.SMTP_PASSWORD),
+    }
+
+
+@app.get("/api/meetings/notion-targets")
+def notion_targets():
+    """프론트가 보여줄 저장 대상 목록(라벨만, 내부 ID는 노출하지 않음)."""
+    return {
+        "targets": [
+            {"key": t["key"], "label": t["label"]} for t in config.NOTION_TARGETS
+        ]
     }
 
 
@@ -132,7 +157,16 @@ async def process_meeting(
     participants: str = Form("[]"),
     emails: str = Form("[]"),
     duration_seconds: float = Form(0),
+    notion_target: str = Form(""),
 ):
+    # 저장 위치는 매번 명시적으로 선택해야 한다.
+    target = _find_notion_target(notion_target)
+    if target is None:
+        return JSONResponse(
+            status_code=400,
+            content={"error": "저장할 Notion 위치를 선택해주세요."},
+        )
+
     meeting_id = datetime.now().strftime("%Y%m%d_%H%M%S")
     safe_name = audio.filename or "meeting.webm"
     audio_path = config.RECORDINGS_DIR / f"{meeting_id}_{safe_name}"
@@ -159,6 +193,10 @@ async def process_meeting(
             duration_seconds,
             meeting_id,
         ),
+        kwargs={
+            "notion_database_id": target.get("database_id", ""),
+            "notion_page_id": target.get("page_id", ""),
+        },
         daemon=True,
     )
     thread.start()

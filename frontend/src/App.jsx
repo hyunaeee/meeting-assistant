@@ -146,6 +146,8 @@ export default function App() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState("");
+  const [notionTargets, setNotionTargets] = useState([]);
+  const [selectedNotionTarget, setSelectedNotionTarget] = useState("");
   const fileRef = useRef(null);
   const mediaRecorderRef = useRef(null);
   const mediaStreamRef = useRef(null);
@@ -164,6 +166,14 @@ export default function App() {
   const [meetingDurationSeconds, setMeetingDurationSeconds] = useState(0);
   const [isSendingEmail, setIsSendingEmail] = useState(false);
   const [manualEmailStatus, setManualEmailStatus] = useState("");
+
+  // 저장 가능한 Notion 대상 목록을 불러온다 (매번 명시적으로 선택).
+  useEffect(() => {
+    fetch(API_BASE_URL + "/api/meetings/notion-targets")
+      .then((r) => r.json())
+      .then((d) => setNotionTargets(Array.isArray(d.targets) ? d.targets : []))
+      .catch(() => setNotionTargets([]));
+  }, []);
 
   const status = useMemo(() => {
     if (isProcessing) return "회의록 생성 중";
@@ -532,6 +542,10 @@ export default function App() {
   };
 
   const processMeeting = async (file, explicitDurationSeconds) => {
+    if (!selectedNotionTarget) {
+      setError("Notion 저장 위치를 먼저 선택해주세요.");
+      return;
+    }
     let durationForRequest = explicitDurationSeconds || meetingDurationSeconds;
     if (!durationForRequest && recordingStartedAtRef.current) {
       durationForRequest = Math.max(1, Math.round((Date.now() - recordingStartedAtRef.current.getTime()) / 1000));
@@ -579,6 +593,7 @@ export default function App() {
       form.append("participants", JSON.stringify(participants));
       form.append("emails", JSON.stringify(emails));
       form.append("duration_seconds", String(durationForRequest || 0));
+      form.append("notion_target", selectedNotionTarget);
 
       // 1) 업로드 → 즉시 job_id 수신 (요청이 짧아 프록시 60초 타임아웃 회피)
       const startResp = await fetch(API_BASE_URL + "/api/meetings/process", {
@@ -770,14 +785,21 @@ export default function App() {
 
               <div className="field">
                 <FieldLabel title="Notion 저장 위치" />
-                <div className="notion-box">
-                  <div className="notion-icon"><FolderOpen size={20} /></div>
-                  <div>
-                    <p className="notion-title">{DEFAULT_NOTION_LOCATION}</p>
-                    <p className="notion-desc">{DEFAULT_NOTION_DESCRIPTION}</p>
-                  </div>
-                </div>
-                <p className="help">회의록 생성 시 이 위치에 자동 저장됩니다.</p>
+                <select
+                  className="input"
+                  value={selectedNotionTarget}
+                  onChange={(e) => setSelectedNotionTarget(e.target.value)}
+                >
+                  <option value="">저장할 위치를 선택하세요</option>
+                  {notionTargets.map((t) => (
+                    <option key={t.key} value={t.key}>{t.label}</option>
+                  ))}
+                </select>
+                <p className="help">
+                  {notionTargets.length
+                    ? "회의록을 저장할 Notion 위치를 매번 선택해주세요."
+                    : "저장 위치를 불러오지 못했습니다. 서버 설정(NOTION_TARGETS)을 확인해주세요."}
+                </p>
               </div>
 
               <div className="field">
@@ -806,7 +828,7 @@ export default function App() {
             <div className="card-inner">
               <h3 className="h2" style={{ fontSize: 20, marginBottom: 16 }}>저장/전달 설정</h3>
               <div className="summary-row">
-                <SummaryItem icon={Database} label="Notion" value={DEFAULT_NOTION_LOCATION + " · 자동 저장"} />
+                <SummaryItem icon={Database} label="Notion" value={(notionTargets.find((t) => t.key === selectedNotionTarget)?.label) || "저장 위치 미선택"} />
                 <SummaryItem icon={Mail} label="Email" value={emails.length ? emails.length + "명에게 전달" : "전달 안 함"} />
                 <SummaryItem icon={Users} label="Participants" value={displayParticipants} />
               </div>
@@ -867,8 +889,8 @@ export default function App() {
                     }
                   }} />
                   <button className="secondary" type="button" onClick={() => fileRef.current?.click()}><Upload size={18} /> {selectedFile ? selectedFile.name : recordedFile ? recordedFile.name : "오디오 파일 선택"}</button>
-                  {recordingState !== "recording" && recordingState !== "paused" && selectedFile && <button className="primary" onClick={processUploadedFile} disabled={isProcessing}><FileText size={18} /> 업로드 파일로 회의록 만들기</button>}
-                  {recordingState !== "recording" && recordingState !== "paused" && !selectedFile && <button className="primary" onClick={startRecording} disabled={audioTestState !== "ready" || isProcessing}><Play size={18} /> 회의 시작</button>}
+                  {recordingState !== "recording" && recordingState !== "paused" && selectedFile && <button className="primary" onClick={processUploadedFile} disabled={isProcessing || !selectedNotionTarget}><FileText size={18} /> 업로드 파일로 회의록 만들기</button>}
+                  {recordingState !== "recording" && recordingState !== "paused" && !selectedFile && <button className="primary" onClick={startRecording} disabled={audioTestState !== "ready" || isProcessing || !selectedNotionTarget}><Play size={18} /> 회의 시작</button>}
                   {recordingState === "recording" && <button className="secondary" onClick={pauseRecording}><Pause size={18} /> 일시정지</button>}
                   {recordingState === "paused" && <button className="primary" onClick={resumeRecording}><Play size={18} /> 다시 시작</button>}
                   {(recordingState === "recording" || recordingState === "paused") && <button className="danger" onClick={finishRecording} disabled={isProcessing}><Square size={18} /> 종료하고 회의록 만들기</button>}
