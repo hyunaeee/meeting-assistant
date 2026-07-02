@@ -580,16 +580,43 @@ export default function App() {
       form.append("emails", JSON.stringify(emails));
       form.append("duration_seconds", String(durationForRequest || 0));
 
-      const controller = new AbortController();
-      const timeoutId = window.setTimeout(() => controller.abort(), 30 * 60 * 1000);
-      const response = await fetch(API_BASE_URL + "/api/meetings/process", {
+      // 1) 업로드 → 즉시 job_id 수신 (요청이 짧아 프록시 60초 타임아웃 회피)
+      const startResp = await fetch(API_BASE_URL + "/api/meetings/process", {
         method: "POST",
         body: form,
-        signal: controller.signal,
       });
-      window.clearTimeout(timeoutId);
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.detail || "회의록 생성 실패");
+      const startData = await startResp.json();
+      if (!startResp.ok || !startData.job_id) {
+        throw new Error(startData.detail || startData.error || "회의록 생성 요청 실패");
+      }
+
+      // 2) 완료될 때까지 상태 폴링 (각 요청도 짧아 타임아웃 안 걸림)
+      const deadlineAt = Date.now() + 30 * 60 * 1000; // 최대 30분 대기
+      let data = null;
+      while (true) {
+        if (Date.now() > deadlineAt) {
+          throw new Error("회의록 생성 시간이 너무 오래 걸립니다. 잠시 후 다시 시도해주세요.");
+        }
+        await new Promise((resolve) => window.setTimeout(resolve, 3000));
+        const statusResp = await fetch(
+          API_BASE_URL + "/api/meetings/status/" + startData.job_id
+        );
+        const statusData = await statusResp.json();
+        if (statusResp.status === 404) {
+          throw new Error("작업을 찾을 수 없습니다. 서버가 재시작되었을 수 있습니다.");
+        }
+        if (!statusResp.ok) {
+          throw new Error(statusData.detail || statusData.error || "상태 확인 실패");
+        }
+        if (statusData.status === "done") {
+          data = statusData.result;
+          break;
+        }
+        if (statusData.status === "error") {
+          throw new Error(statusData.error || "회의록 생성 실패");
+        }
+        // status === "processing" → 계속 폴링
+      }
       setResult(data);
       setManualEmailStatus("");
       setProcessingLogs((prev) => {

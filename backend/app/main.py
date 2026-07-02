@@ -1,5 +1,7 @@
 import json
 import shutil
+import threading
+import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
@@ -7,6 +9,7 @@ from typing import Optional
 
 from fastapi import FastAPI, File, Form, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from app import config
@@ -39,6 +42,62 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# ── 비동기 회의록 처리용 인메모리 job 저장소 ──────────────────────────────
+# process 요청은 즉시 job_id 만 돌려주고, 실제 처리는 백그라운드 스레드에서 수행한다.
+# 프론트는 /api/meetings/status/{job_id} 를 폴링한다. 각 요청이 짧아 프록시 60초
+# 타임아웃(504)에 걸리지 않는다.
+_jobs: dict[str, dict] = {}
+_jobs_lock = threading.Lock()
+# Whisper 모델은 동시 호출에 안전하지 않을 수 있어 전사만 직렬화한다.
+_transcribe_lock = threading.Lock()
+
+
+def _run_meeting_job(
+    job_id: str,
+    audio_path: Path,
+    title: str,
+    participant_list: list[str],
+    email_list: list[str],
+    duration_seconds: float,
+    meeting_id: str,
+) -> None:
+    try:
+        with _transcribe_lock:
+            try:
+                transcript = transcribe_audio(audio_path)
+            except Exception as exc:  # noqa: BLE001
+                transcript = f"[00:00:00 - 00:00:01] 전사 처리 실패: {exc}"
+
+        notes = summarize_transcript(
+            transcript, meeting_title=title, participants=participant_list
+        )
+
+        notion_url = ""
+        notion_error = ""
+        try:
+            notion_url = upload_to_notion(notes, transcript)
+        except Exception as exc:  # noqa: BLE001
+            notion_error = str(exc)
+
+        result = {
+            "meeting_id": meeting_id,
+            "transcript": transcript,
+            "notes": notes,
+            "notion_url": notion_url,
+            "notion_error": notion_error,
+            "email_sent": False,
+            "email_error": "",
+            "duration_seconds": duration_seconds,
+            "requested_emails": email_list,
+        }
+        _save_result(meeting_id, result)
+        with _jobs_lock:
+            _jobs[job_id] = {"status": "done", "result": result}
+    except Exception as exc:  # noqa: BLE001
+        with _jobs_lock:
+            _jobs[job_id] = {"status": "error", "error": str(exc)}
 
 
 class SavePayload(BaseModel):
@@ -84,33 +143,39 @@ async def process_meeting(
     participant_list = _parse_json_list(participants)
     email_list = _parse_json_list(emails)
 
-    try:
-        transcript = transcribe_audio(audio_path)
-    except Exception as exc:
-        transcript = f"[00:00:00 - 00:00:01] 전사 처리 실패: {exc}"
+    # 실제 처리(전사·요약·Notion)는 백그라운드에서 수행하고 즉시 job_id 를 돌려준다.
+    job_id = uuid.uuid4().hex
+    with _jobs_lock:
+        _jobs[job_id] = {"status": "processing"}
 
-    notes = summarize_transcript(transcript, meeting_title=title, participants=participant_list)
+    thread = threading.Thread(
+        target=_run_meeting_job,
+        args=(
+            job_id,
+            audio_path,
+            title,
+            participant_list,
+            email_list,
+            duration_seconds,
+            meeting_id,
+        ),
+        daemon=True,
+    )
+    thread.start()
 
-    notion_url = ""
-    notion_error = ""
-    try:
-        notion_url = upload_to_notion(notes, transcript)
-    except Exception as exc:
-        notion_error = str(exc)
+    return {"job_id": job_id, "status": "processing", "meeting_id": meeting_id}
 
-    result = {
-        "meeting_id": meeting_id,
-        "transcript": transcript,
-        "notes": notes,
-        "notion_url": notion_url,
-        "notion_error": notion_error,
-        "email_sent": False,
-        "email_error": "",
-        "duration_seconds": duration_seconds,
-        "requested_emails": email_list,
-    }
-    _save_result(meeting_id, result)
-    return result
+
+@app.get("/api/meetings/status/{job_id}")
+def meeting_status(job_id: str):
+    with _jobs_lock:
+        job = _jobs.get(job_id)
+    if job is None:
+        return JSONResponse(
+            status_code=404,
+            content={"status": "not_found", "error": "작업을 찾을 수 없습니다."},
+        )
+    return job
 
 
 @app.post("/api/meetings/save-text")
