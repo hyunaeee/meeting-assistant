@@ -139,7 +139,7 @@ export default function App() {
   const [participants, setParticipants] = useState([]);
   const [emailInput, setEmailInput] = useState("");
   const [emails, setEmails] = useState([]);
-  const [selectedSource, setSelectedSource] = useState("system");
+  const [selectedSource, setSelectedSource] = useState("mic");
   const [selectedFile, setSelectedFile] = useState(null);
   const [recordedFile, setRecordedFile] = useState(null);
   const [recordingStartedAt, setRecordingStartedAt] = useState(null);
@@ -872,8 +872,8 @@ export default function App() {
               </div>
 
               <div className="source-grid">
-                <SourceButton active={selectedSource === "system"} icon={MonitorSpeaker} title="온라인 회의" desc="시스템/탭 오디오 녹음" onClick={() => { setSelectedSource("system"); resetAudioTester("온라인 회의 오디오를 다시 테스트해주세요."); }} />
                 <SourceButton active={selectedSource === "mic"} icon={Mic} title="오프라인 회의" desc="마이크로 바로 녹음" onClick={() => { setSelectedSource("mic"); resetAudioTester("마이크 입력을 다시 테스트해주세요."); }} />
+                <SourceButton active={selectedSource === "system"} icon={MonitorSpeaker} title="온라인 회의" desc="시스템/탭 오디오 녹음" onClick={() => { setSelectedSource("system"); resetAudioTester("온라인 회의 오디오를 다시 테스트해주세요."); }} />
               </div>
 
               <AudioTester
