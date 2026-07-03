@@ -26,6 +26,7 @@ import {
   Waves,
   Upload,
   ExternalLink,
+  Loader2,
 } from "lucide-react";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
@@ -569,20 +570,22 @@ export default function App() {
     setProcessingLogs(baseLogs);
 
     const timedMessages = [
-      "음성 파일을 분석 가능한 형식으로 변환 중",
-      "Whisper가 회의 음성을 텍스트로 변환 중",
-      "전사본을 정리하고 회의 내용을 확인 중",
-      "Claude가 회의 요약 JSON을 생성 중",
-      "Notion에 회의록 페이지를 저장 중",
-      emails.length ? "이메일 전달 준비 중" : "최종 결과를 정리 중",
+      "음성 파일을 분석 가능한 형식으로 변환하고 있어요",
+      "회의 음성을 텍스트로 받아쓰고 있어요 (길수록 오래 걸려요)",
+      "목소리를 구분해 화자를 나누고 있어요",
+      "대화 내용으로 화자와 참가자를 추측하고 있어요",
+      "AI가 회의 요약을 만들고 있어요",
+      "Notion에 회의록을 저장하고 있어요",
+      emails.length ? "이메일 전달을 준비하고 있어요" : "마무리하고 있어요",
     ];
     let messageIndex = 0;
     const progressTimer = window.setInterval(() => {
-      const message = timedMessages[Math.min(messageIndex, timedMessages.length - 1)];
+      // 마지막 단계에 도달하면 그 항목을 active(스피너) 상태로 유지 → 오래 걸려도 멈춘 것처럼 안 보임
+      if (messageIndex >= timedMessages.length) return;
+      const message = timedMessages[messageIndex];
       setProcessingLogs((prev) => {
         const withoutActive = prev.map((log) => log.status === "active" ? { ...log, status: "done" } : log);
-        const alreadyExists = withoutActive.some((log) => log.label === message);
-        if (alreadyExists) return withoutActive;
+        if (withoutActive.some((log) => log.label === message)) return withoutActive;
         return [...withoutActive, { label: message, status: "active" }];
       });
       messageIndex += 1;
@@ -1018,7 +1021,11 @@ function ProcessingLog({ logs }) {
     <p className="process-title">진행 상황</p>
     {logs.map((log, index) => (
       <div key={index + log.label} className={"process-log-row " + (log.status || "")}>
-        <span className="process-dot" />
+        {log.status === "active"
+          ? <Loader2 size={15} className="process-spin" />
+          : log.status === "done"
+            ? <CheckCircle2 size={15} className="process-check" />
+            : <span className="process-dot" />}
         <span>{log.label}</span>
       </div>
     ))}
@@ -1035,9 +1042,10 @@ function ResultPanel({ result, notes, participants, emails, error, isProcessing,
     setResultEmails(emails || []);
   }, [emails]);
 
-  // 새 결과가 오면 화자 매칭 초기화
+  // 새 결과가 오면 AI가 추측한 화자↔참가자 매핑으로 초기화(수정 가능)
   useEffect(() => {
-    setSpeakerMap({});
+    const guess = result?.speaker_guess;
+    setSpeakerMap(guess && typeof guess === "object" ? { ...guess } : {});
   }, [result?.meeting_id]);
 
   const segments = Array.isArray(result?.segments) ? result.segments : [];
@@ -1112,21 +1120,23 @@ function ResultPanel({ result, notes, participants, emails, error, isProcessing,
     <div className="stack"><div className="card"><div className="card-inner"><div className="section-title"><h3>전사 미리보기</h3><FileText size={24} color="#64748b" /></div>
       {speakers.length > 0 && (
         <div className="speaker-map">
-          <p className="speaker-map-title">화자 매칭 <span className="speaker-map-hint">(원하면 참가자로 지정)</span></p>
+          <p className="speaker-map-title">화자 매칭 <span className="speaker-map-hint">(AI 추측 · 수정 가능)</span></p>
           <datalist id="participant-options">{(participants || []).map((p) => <option key={p} value={p} />)}</datalist>
-          {speakers.map((sp) => (
-            <div key={sp} className="speaker-map-row">
-              <span className="speaker">{sp}</span>
-              <span className="speaker-map-arrow">→</span>
-              <input
-                className="input speaker-map-input"
-                list="participant-options"
-                placeholder={"그대로 (" + sp + ")"}
-                value={speakerMap[sp] || ""}
-                onChange={(e) => setSpeakerMap((m) => ({ ...m, [sp]: e.target.value }))}
-              />
-            </div>
-          ))}
+          <div className="speaker-map-grid">
+            {speakers.map((sp) => (
+              <div key={sp} className="speaker-map-row">
+                <span className="speaker">{sp}</span>
+                <span className="speaker-map-arrow">→</span>
+                <input
+                  className="input speaker-map-input"
+                  list="participant-options"
+                  placeholder={"그대로 (" + sp + ")"}
+                  value={speakerMap[sp] || ""}
+                  onChange={(e) => setSpeakerMap((m) => ({ ...m, [sp]: e.target.value }))}
+                />
+              </div>
+            ))}
+          </div>
         </div>
       )}
       <div className="transcript-scroll">

@@ -13,7 +13,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from app import config
-from app.services.claude import summarize_transcript
+from app.services.claude import guess_speaker_mapping, summarize_transcript
 from app.services.emailer import send_meeting_email
 from app.services.notion import upload as upload_to_notion
 from app.services import diarize as diarize_svc
@@ -92,6 +92,14 @@ def _run_meeting_job(
             transcript, meeting_title=title, participants=participant_list
         )
 
+        # 등장 순서대로 고유 화자 목록 → 대화 내용으로 참가자 추측 매핑(best-effort)
+        speaker_labels: list[str] = []
+        for seg in segments:
+            sp = seg.get("speaker")
+            if sp and sp not in speaker_labels:
+                speaker_labels.append(sp)
+        speaker_guess = guess_speaker_mapping(transcript, speaker_labels, participant_list)
+
         notion_url = ""
         notion_error = ""
         try:
@@ -109,6 +117,7 @@ def _run_meeting_job(
             "meeting_id": meeting_id,
             "transcript": transcript,
             "segments": segments,
+            "speaker_guess": speaker_guess,
             "notes": notes,
             "notion_url": notion_url,
             "notion_error": notion_error,

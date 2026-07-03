@@ -48,6 +48,46 @@ EMPTY_NOTES = {
 }
 
 
+SPEAKER_MAP_SYSTEM = """당신은 회의 전사본에서 각 화자가 실제로 누구인지 추정하는 전문가입니다.
+화자 라벨(화자 1, 화자 2 ...)마다 대화 내용을 근거로 가장 가능성 높은 인물을 추정하세요.
+- 사용자가 제공한 참석자 목록이 있으면 그 중에서 우선 매칭합니다.
+- 목록에 없거나 애매하면, 대화에서 드러난 이름/호칭/역할(예: "김부장", "진행자")을 사용합니다.
+- 추정 근거가 전혀 없으면 그 화자는 결과에서 생략합니다.
+반드시 아래 JSON 형식으로만 응답하세요. 다른 텍스트 금지:
+{"화자 1": "추정이름", "화자 2": "추정이름"}
+"""
+
+
+def guess_speaker_mapping(transcript: str, speakers: list[str], participants: list[str] | None = None) -> dict[str, str]:
+    """각 화자 라벨에 대한 추정 인물명을 반환한다(best-effort). 실패 시 빈 dict."""
+    if not config.ANTHROPIC_API_KEY or not speakers or not transcript.strip():
+        return {}
+    try:
+        client = Anthropic(api_key=config.ANTHROPIC_API_KEY)
+        user_prompt = (
+            f"참석자 목록: {', '.join(participants or []) or '없음'}\n"
+            f"화자 목록: {', '.join(speakers)}\n\n"
+            f"전사본:\n{transcript}"
+        )
+        message = client.messages.create(
+            model=config.CLAUDE_MODEL,
+            max_tokens=500,
+            system=SPEAKER_MAP_SYSTEM,
+            messages=[{"role": "user", "content": user_prompt}],
+        )
+        text = "".join(block.text for block in message.content if getattr(block, "type", None) == "text")
+        data = _json_from_text(text)
+        if not isinstance(data, dict):
+            return {}
+        return {
+            str(k): str(v).strip()
+            for k, v in data.items()
+            if k in speakers and str(v).strip()
+        }
+    except Exception:
+        return {}
+
+
 def _json_from_text(text: str) -> dict[str, Any]:
     stripped = text.strip()
     if stripped.startswith("```"):
