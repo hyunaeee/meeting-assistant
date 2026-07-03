@@ -235,11 +235,12 @@ select.input { appearance: none; -webkit-appearance: none; cursor: pointer; padd
 .speaker-map-row .speaker { margin-bottom: 0; flex: none; }
 .speaker-map-arrow { color: var(--muted); flex: none; }
 .speaker-map-input { height: 40px; flex: 1; min-width: 0; box-shadow: none; }
-.transcript-scroll { max-height: 460px; overflow-y: auto; display: grid; gap: 12px; padding-right: 6px; }
-.transcript-scroll::-webkit-scrollbar { width: 8px; }
-.transcript-scroll::-webkit-scrollbar-thumb { background: #d8dce4; border-radius: 999px; }
-.transcript-scroll::-webkit-scrollbar-track { background: transparent; }
-@media (max-width: 640px) { .transcript-scroll { max-height: 340px; } }
+.transcript-scroll, .summary-scroll { max-height: 460px; overflow-y: auto; padding-right: 6px; }
+.transcript-scroll { display: grid; gap: 12px; }
+.transcript-scroll::-webkit-scrollbar, .summary-scroll::-webkit-scrollbar { width: 8px; }
+.transcript-scroll::-webkit-scrollbar-thumb, .summary-scroll::-webkit-scrollbar-thumb { background: #d8dce4; border-radius: 999px; }
+.transcript-scroll::-webkit-scrollbar-track, .summary-scroll::-webkit-scrollbar-track { background: transparent; }
+@media (max-width: 640px) { .transcript-scroll, .summary-scroll { max-height: 340px; } }
 
 /* ───────────────────────── Responsive ───────────────────────── */
 /* Tablet: single column */

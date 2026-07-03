@@ -1109,6 +1109,7 @@ function ResultPanel({ result, notes, participants, emails, error, isProcessing,
 
   return <motion.div className="result-grid" initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35 }}>
     <div className="card"><div className="card-inner"><div className="section-title"><div><h3>회의 요약</h3><p>{durationLabel}짜리 회의 요약입니다. 회의록 생성 후 Notion에 자동 저장됩니다.</p></div><ListChecks size={24} color="#64748b" /></div>
+      <div className="summary-scroll">
       {isProcessing && <div className="notice">{durationLabel}짜리 회의를 전사, Claude 요약, Notion 자동 저장 순서로 처리 중입니다.</div>}
       {processingLogs?.length > 0 && <ProcessingLog logs={processingLogs} />}
       {!isProcessing && !notes && <div className="notice">아직 생성된 회의록이 없습니다.</div>}
@@ -1119,6 +1120,7 @@ function ResultPanel({ result, notes, participants, emails, error, isProcessing,
       {result?.email_sent && <div className="success">이메일 전달 완료: {sentCount}명</div>}
       {result?.email_error && <div className="error">이메일 전달 실패: {result.email_error}</div>}
       {error && <div className="error">{error}</div>}
+      </div>
     </div></div>
 
     <div className="stack"><div className="card"><div className="card-inner"><div className="section-title"><h3>전사 미리보기</h3><FileText size={24} color="#64748b" /></div>
