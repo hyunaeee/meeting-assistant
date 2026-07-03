@@ -112,6 +112,7 @@ def _run_meeting_job(
                 department=department,
                 registrant=registrant,
                 upload_date=upload_date,
+                duration_minutes=int(round((duration_seconds or 0) / 60)),
             )
         except Exception as exc:  # noqa: BLE001
             notion_error = str(exc)
@@ -169,6 +170,42 @@ def health():
 def departments():
     """프론트 드롭다운용 부서 목록."""
     return {"departments": config.DEPARTMENTS}
+
+
+@app.get("/api/stats/monthly")
+def monthly_stats():
+    """저장된 회의록 기록을 월 단위로 집계한다."""
+    buckets: dict[str, dict] = {}
+    for path in config.STORAGE_DIR.glob("*.json"):
+        if path.name.endswith("_notes.json"):
+            continue  # 회의록 본문 파일은 제외 (전체 결과 파일만 집계)
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001
+            continue
+
+        meeting_id = str(data.get("meeting_id") or path.stem)
+        upload_date = str(data.get("upload_date") or "")
+        if len(upload_date) >= 7:
+            month = upload_date[:7]  # YYYY-MM
+        elif len(meeting_id) >= 6 and meeting_id[:6].isdigit():
+            month = f"{meeting_id[:4]}-{meeting_id[4:6]}"
+        else:
+            month = "기타"
+
+        bucket = buckets.setdefault(
+            month,
+            {"month": month, "count": 0, "total_minutes": 0, "by_department": {}, "by_registrant": {}},
+        )
+        bucket["count"] += 1
+        bucket["total_minutes"] += int(round((data.get("duration_seconds") or 0) / 60))
+        dept = data.get("department") or "미지정"
+        reg = data.get("registrant") or "미지정"
+        bucket["by_department"][dept] = bucket["by_department"].get(dept, 0) + 1
+        bucket["by_registrant"][reg] = bucket["by_registrant"].get(reg, 0) + 1
+
+    months = sorted(buckets.values(), key=lambda b: b["month"], reverse=True)
+    return {"months": months, "total_count": sum(m["count"] for m in months)}
 
 
 @app.post("/api/meetings/process")

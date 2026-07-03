@@ -27,6 +27,7 @@ import {
   Upload,
   ExternalLink,
   Loader2,
+  BarChart3,
 } from "lucide-react";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
@@ -150,6 +151,7 @@ export default function App() {
   const [departments, setDepartments] = useState([]);
   const [selectedDepartment, setSelectedDepartment] = useState("");
   const [registrant, setRegistrant] = useState("");
+  const [statsOpen, setStatsOpen] = useState(false);
   const fileRef = useRef(null);
   const mediaRecorderRef = useRef(null);
   const mediaStreamRef = useRef(null);
@@ -741,15 +743,19 @@ export default function App() {
               <p className="logo-sub">{status}</p>
             </div>
           </div>
-          <div className="steps">
-            <StepPill active={step === "setup"} done={step !== "setup"} label="설정" />
-            <ChevronRight size={16} color="#cbd5e1" />
-            <StepPill active={step === "recording"} done={step === "result"} label="녹음" />
-            <ChevronRight size={16} color="#cbd5e1" />
-            <StepPill active={step === "result"} done={false} label="결과" />
+          <div className="header-right">
+            <button className="stats-btn" type="button" onClick={() => setStatsOpen(true)}><BarChart3 size={16} /> 이용 통계</button>
+            <div className="steps">
+              <StepPill active={step === "setup"} done={step !== "setup"} label="설정" />
+              <ChevronRight size={16} color="#cbd5e1" />
+              <StepPill active={step === "recording"} done={step === "result"} label="녹음" />
+              <ChevronRight size={16} color="#cbd5e1" />
+              <StepPill active={step === "result"} done={false} label="결과" />
+            </div>
           </div>
         </div>
       </header>
+      {statsOpen && <StatsModal onClose={() => setStatsOpen(false)} />}
 
       <section className={"container" + (step === "result" ? " container-result" : "")}>
         {step !== "result" && (
@@ -1034,6 +1040,55 @@ function ProcessingLog({ logs }) {
       </div>
     ))}
   </div>;
+}
+
+function StatsModal({ onClose }) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetch(API_BASE_URL + "/api/stats/monthly")
+      .then((r) => r.json())
+      .then((d) => { setData(d); setLoading(false); })
+      .catch(() => { setData({ months: [], total_count: 0 }); setLoading(false); });
+  }, []);
+
+  const months = data?.months || [];
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head">
+          <div>
+            <h3 className="h2" style={{ fontSize: 22 }}>이용 통계</h3>
+            <p className="help">월 단위 회의록 생성 기록{data ? ` · 전체 ${data.total_count}건` : ""}</p>
+          </div>
+          <button className="modal-close" type="button" onClick={onClose} aria-label="닫기"><X size={18} /></button>
+        </div>
+        {loading ? (
+          <p className="help" style={{ padding: "12px 0" }}><Loader2 size={15} className="process-spin" /> 불러오는 중…</p>
+        ) : months.length === 0 ? (
+          <p className="help" style={{ padding: "12px 0" }}>아직 기록이 없습니다.</p>
+        ) : (
+          <div className="stats-scroll">
+            {months.map((m) => (
+              <div key={m.month} className="stats-month">
+                <div className="stats-month-head">
+                  <b>{m.month}</b>
+                  <span>{m.count}건 · {m.total_minutes}분</span>
+                </div>
+                <div className="stats-tags">
+                  {Object.entries(m.by_department).map(([k, v]) => (
+                    <span key={k} className="tag">{k} <b>{v}</b></span>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }
 
 function ResultPanel({ result, notes, participants, emails, error, isProcessing, processingLogs, durationLabel, onSendEmail, isSendingEmail, manualEmailStatus, onReset }) {

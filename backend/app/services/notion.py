@@ -34,7 +34,8 @@ def _http_headers() -> dict[str, str]:
     }
 
 
-def _get_data_source_id(db_id: str) -> tuple[str, str]:
+def _get_data_source_id(db_id: str) -> tuple[str, str, set[str]]:
+    """(data_source_id, title 속성명, 전체 속성명 집합) 을 반환한다."""
     r = httpx.get(f"{NOTION_API}/databases/{db_id}", headers=_http_headers(), timeout=60)
     r.raise_for_status()
     db_data = r.json()
@@ -42,13 +43,14 @@ def _get_data_source_id(db_id: str) -> tuple[str, str]:
     data_sources = db_data.get("data_sources", [])
     if not data_sources:
         # 구버전/환경 대응: database_id parent로 직접 생성할 때 쓸 title prop 탐색
+        props = db_data.get("properties", {})
         title_prop = None
-        for name, info in db_data.get("properties", {}).items():
+        for name, info in props.items():
             if info.get("type") == "title":
                 title_prop = name
                 break
         if title_prop:
-            return db_id, title_prop
+            return db_id, title_prop, set(props.keys())
         raise RuntimeError("DB에 data source가 없습니다. Notion 데이터베이스를 다시 확인하세요.")
 
     ds_id = data_sources[0]["id"]
@@ -56,8 +58,9 @@ def _get_data_source_id(db_id: str) -> tuple[str, str]:
     r.raise_for_status()
     ds_data = r.json()
 
+    props = ds_data.get("properties", {})
     title_prop = None
-    for name, info in ds_data.get("properties", {}).items():
+    for name, info in props.items():
         if info.get("type") == "title":
             title_prop = name
             break
@@ -65,7 +68,7 @@ def _get_data_source_id(db_id: str) -> tuple[str, str]:
     if not title_prop:
         raise RuntimeError("data source에 title 속성이 없습니다.")
 
-    return ds_id, title_prop
+    return ds_id, title_prop, set(props.keys())
 
 
 def _rich_text(text: str) -> list[dict[str, Any]]:
@@ -93,10 +96,19 @@ def _toggle(title: str, child_blocks: list[dict[str, Any]]) -> dict[str, Any]:
     return {"object": "block", "type": "toggle", "toggle": {"rich_text": _rich_text(title), "children": child_blocks}}
 
 
-def _create_database_page(ds_id: str, title_prop: str, title: str, children: list[dict[str, Any]]) -> dict[str, Any]:
+def _create_database_page(
+    ds_id: str,
+    title_prop: str,
+    title: str,
+    children: list[dict[str, Any]],
+    extra_props: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    properties = {title_prop: {"title": [{"text": {"content": title}}]}}
+    if extra_props:
+        properties.update(extra_props)
     body = {
         "parent": {"type": "data_source_id", "data_source_id": ds_id},
-        "properties": {title_prop: {"title": [{"text": {"content": title}}]}},
+        "properties": properties,
         "children": children,
     }
     r = httpx.post(f"{NOTION_API}/pages", headers=_http_headers(), json=body, timeout=60)
@@ -104,7 +116,7 @@ def _create_database_page(ds_id: str, title_prop: str, title: str, children: lis
         # 일부 워크스페이스가 data_source parent를 아직 받지 못할 때 database_id parent fallback
         fallback = {
             "parent": {"database_id": ds_id},
-            "properties": {title_prop: {"title": [{"text": {"content": title}}]}},
+            "properties": properties,
             "children": children,
         }
         r = httpx.post(f"{NOTION_API}/pages", headers=_http_headers(), json=fallback, timeout=60)
@@ -207,6 +219,7 @@ def upload(
     department: str = "",
     registrant: str = "",
     upload_date: str = "",
+    duration_minutes: int = 0,
 ) -> str:
     base_title = notes.get("title") or f"회의록 {datetime.now().strftime('%Y-%m-%d %H:%M')}"
     # 제목 앞에 부서를 붙여 Notion 목록에서 바로 구분되게 한다.
@@ -214,8 +227,19 @@ def upload(
     blocks = _build_blocks(notes, transcript, department, registrant, upload_date)
 
     if config.NOTION_DATABASE_ID:
-        ds_id, title_prop = _get_data_source_id(config.NOTION_DATABASE_ID)
-        page = _create_database_page(ds_id, title_prop, title, blocks[:100])
+        ds_id, title_prop, prop_names = _get_data_source_id(config.NOTION_DATABASE_ID)
+        # 월별 통계용 속성(열)이 DB에 있으면 채운다. 없으면 건너뛴다.
+        candidate_props: dict[str, Any] = {}
+        if department:
+            candidate_props["부서"] = {"select": {"name": department}}
+        if registrant:
+            candidate_props["등록자"] = {"rich_text": [{"text": {"content": registrant}}]}
+        if upload_date:
+            candidate_props["등록일"] = {"date": {"start": upload_date}}
+        if duration_minutes:
+            candidate_props["소요시간(분)"] = {"number": duration_minutes}
+        extra_props = {k: v for k, v in candidate_props.items() if k in prop_names}
+        page = _create_database_page(ds_id, title_prop, title, blocks[:100], extra_props)
     elif config.NOTION_PAGE_ID:
         page = _create_child_page(config.NOTION_PAGE_ID, title, blocks[:100])
     else:
