@@ -1,4 +1,5 @@
 import json
+import re
 from typing import Any
 from anthropic import Anthropic
 from app import config
@@ -128,12 +129,14 @@ def summarize_transcript(transcript: str, meeting_title: str = "", participants:
 
     if meeting_title and (not notes.get("title") or notes.get("title") == "회의록"):
         notes["title"] = meeting_title
-    if participants:
-        existing_attendees = notes.get("attendees") or []
-        merged_attendees = []
-        for name in [*participants, *existing_attendees]:
-            value = str(name).strip()
-            if value and value not in merged_attendees:
-                merged_attendees.append(value)
-        notes["attendees"] = merged_attendees
+    existing_attendees = notes.get("attendees") or []
+    merged_attendees = []
+    for name in [*(participants or []), *existing_attendees]:
+        value = str(name).strip()
+        # "화자 1" 같은 자동 라벨은 실제 참석자가 아니므로 제외
+        if not value or re.fullmatch(r"화자\s*\d+", value):
+            continue
+        if value not in merged_attendees:
+            merged_attendees.append(value)
+    notes["attendees"] = merged_attendees
     return notes

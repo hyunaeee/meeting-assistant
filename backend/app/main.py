@@ -88,8 +88,11 @@ def _run_meeting_job(
                 segments = []
                 transcript = f"[00:00:00 - 00:00:01] 전사 처리 실패: {exc}"
 
+        # 요약에는 화자 라벨(화자 N)을 뺀 전사본을 넘겨, Claude가 라벨을 참석자로
+        # 오인하지 않고 대화 내용에서 실제 이름을 찾도록 한다.
+        plain_transcript = segments_to_text(segments, include_speaker=False) if segments else transcript
         notes = summarize_transcript(
-            transcript, meeting_title=title, participants=participant_list
+            plain_transcript, meeting_title=title, participants=participant_list
         )
 
         # 등장 순서대로 고유 화자 목록 → 대화 내용으로 참가자 추측 매핑(best-effort)

@@ -54,12 +54,14 @@ def transcribe_segments(audio_path: Path):
     return out, wav_path
 
 
-def segments_to_text(segments: list[dict]) -> str:
-    """세그먼트 목록을 전사본 문자열로 변환한다. speaker가 있으면 앞에 붙인다."""
+def segments_to_text(segments: list[dict], include_speaker: bool = True) -> str:
+    """세그먼트 목록을 전사본 문자열로 변환한다.
+    include_speaker=True 면 speaker 라벨(화자 N)을 앞에 붙인다.
+    """
     lines = []
     for s in segments:
         speaker = s.get("speaker") or ""
-        prefix = f"[{speaker}] " if speaker else ""
+        prefix = f"[{speaker}] " if (include_speaker and speaker) else ""
         lines.append(f"{prefix}[{_format_time(s['start'])} - {_format_time(s['end'])}] {s['text']}")
     return "\n".join(lines)
 

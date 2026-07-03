@@ -751,7 +751,8 @@ export default function App() {
         </div>
       </header>
 
-      <section className="container">
+      <section className={"container" + (step === "result" ? " container-result" : "")}>
+        {step !== "result" && (
         <aside className="stack">
           <motion.div className="card" initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }}>
             <div className="card-inner">
@@ -858,8 +859,10 @@ export default function App() {
             </div>
           </motion.div>
         </aside>
+        )}
 
         <section className="stack">
+          {step !== "result" && (
           <motion.div className="hero-card" initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.45 }}>
             <div className="hero-inner">
               <div className="hero-top">
@@ -927,10 +930,11 @@ export default function App() {
               </div>
             </div>
           </motion.div>
+          )}
 
           {step === "setup" && <EmptyState />}
           {step === "recording" && <ProgressPanel recordingState={recordingState} />}
-          {step === "result" && <ResultPanel result={result} notes={notes} participants={participants} emails={emails} error={error} isProcessing={isProcessing} processingLogs={processingLogs} durationLabel={displayDuration} onSendEmail={sendEmailAfterMeeting} isSendingEmail={isSendingEmail} manualEmailStatus={manualEmailStatus} />}
+          {step === "result" && <ResultPanel result={result} notes={notes} participants={participants} emails={emails} error={error} isProcessing={isProcessing} processingLogs={processingLogs} durationLabel={displayDuration} onSendEmail={sendEmailAfterMeeting} isSendingEmail={isSendingEmail} manualEmailStatus={manualEmailStatus} onReset={resetMeeting} />}
         </section>
       </section>
     </main>
@@ -1032,7 +1036,7 @@ function ProcessingLog({ logs }) {
   </div>;
 }
 
-function ResultPanel({ result, notes, participants, emails, error, isProcessing, processingLogs, durationLabel, onSendEmail, isSendingEmail, manualEmailStatus }) {
+function ResultPanel({ result, notes, participants, emails, error, isProcessing, processingLogs, durationLabel, onSendEmail, isSendingEmail, manualEmailStatus, onReset }) {
   const [emailComposerOpen, setEmailComposerOpen] = useState(false);
   const [resultEmailInput, setResultEmailInput] = useState("");
   const [resultEmails, setResultEmails] = useState(emails || []);
@@ -1154,7 +1158,7 @@ function ResultPanel({ result, notes, participants, emails, error, isProcessing,
             : <p className="help">전사 내용이 아직 없습니다.</p>}
       </div>
     </div></div>
-    <div className="card"><div className="card-inner"><h3 className="h2" style={{ fontSize: 22, marginBottom: 16 }}>최종 처리</h3><button className="final-btn" disabled><Save size={18} /> Notion 자동 저장</button><button className="outline-btn" disabled={!notes || isProcessing || isSendingEmail} onClick={sendResultEmail}><Send size={18} /> {isSendingEmail ? "이메일 보내는 중" : emailComposerOpen ? "입력한 이메일로 보내기" : "이메일 보내기"}{emailComposerOpen && resultEmails.length ? " (" + resultEmails.length + "명)" : ""}</button><p className="notice">Notion 업로드가 끝난 뒤에도 원하면 이메일을 보낼 수 있습니다. 이메일을 입력하고 바로 보내기를 눌러도 입력 중인 주소까지 함께 발송됩니다.</p>
+    <div className="card"><div className="card-inner"><h3 className="h2" style={{ fontSize: 22, marginBottom: 16 }}>최종 처리</h3>{onReset && <button className="final-btn" onClick={onReset}><RotateCcw size={18} /> 새 회의 시작</button>}<button className="outline-btn" disabled style={{ marginBottom: 10 }}><Save size={18} /> Notion 자동 저장됨</button><button className="outline-btn" disabled={!notes || isProcessing || isSendingEmail} onClick={sendResultEmail}><Send size={18} /> {isSendingEmail ? "이메일 보내는 중" : emailComposerOpen ? "입력한 이메일로 보내기" : "이메일 보내기"}{emailComposerOpen && resultEmails.length ? " (" + resultEmails.length + "명)" : ""}</button><p className="notice">Notion 업로드가 끝난 뒤에도 원하면 이메일을 보낼 수 있습니다. 이메일을 입력하고 바로 보내기를 눌러도 입력 중인 주소까지 함께 발송됩니다.</p>
       {emailComposerOpen && <div className="result-email-box"><div className="input-row"><input className="input" value={resultEmailInput} onChange={(e) => setResultEmailInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addResultEmail(); } }} placeholder="이메일 입력 후 Enter 또는 추가" /><button className="add-btn" type="button" onClick={addResultEmail}><Plus size={20} /></button></div><TagList items={resultEmails} onRemove={removeResultEmail} variant="dark" />{!resultEmails.length && <p className="help">여러 명에게 보내려면 쉼표, 세미콜론, 줄바꿈 또는 Enter로 구분하세요.</p>}</div>}
       {manualEmailStatus && <div className={manualEmailStatus.includes("완료") ? "success" : manualEmailStatus.includes("오류") || manualEmailStatus.includes("실패") ? "error" : "notice"}>{manualEmailStatus}</div>}</div></div></div>
   </motion.div>;

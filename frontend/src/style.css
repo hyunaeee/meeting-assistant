@@ -73,6 +73,8 @@ button, input, textarea, select { font: inherit; }
 
 /* Layout */
 .container { position: relative; z-index: 1; max-width: 1280px; margin: 0 auto; padding: 32px 28px; display: grid; grid-template-columns: 430px 1fr; gap: 24px; }
+/* 결과 화면: 설정 사이드바 없이 요약·전사만 전체폭으로 */
+.container-result { grid-template-columns: 1fr; }
 .stack { display: grid; gap: 24px; }
 .card { border-radius: var(--r-2xl); border: 1px solid var(--border); background: var(--surface); box-shadow: var(--shadow-md); }
 .card-inner { padding: 24px; }
