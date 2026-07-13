@@ -113,6 +113,7 @@ def _run_meeting_job(
                 registrant=registrant,
                 upload_date=upload_date,
                 duration_minutes=int(round((duration_seconds or 0) / 60)),
+                database_id=config.NOTION_DB_BY_DEPARTMENT.get(department, ""),
             )
         except Exception as exc:  # noqa: BLE001
             notion_error = str(exc)

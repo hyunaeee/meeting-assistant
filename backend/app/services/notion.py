@@ -220,14 +220,17 @@ def upload(
     registrant: str = "",
     upload_date: str = "",
     duration_minutes: int = 0,
+    database_id: str = "",
 ) -> str:
     base_title = notes.get("title") or f"회의록 {datetime.now().strftime('%Y-%m-%d %H:%M')}"
     # 제목 앞에 부서를 붙여 Notion 목록에서 바로 구분되게 한다.
     title = f"[{department}] {base_title}" if department else base_title
     blocks = _build_blocks(notes, transcript, department, registrant, upload_date)
 
-    if config.NOTION_DATABASE_ID:
-        ds_id, title_prop, prop_names = _get_data_source_id(config.NOTION_DATABASE_ID)
+    # 부서별 DB가 지정되면 그 DB로, 아니면 기본 DB로 저장한다.
+    target_db = database_id or config.NOTION_DATABASE_ID
+    if target_db:
+        ds_id, title_prop, prop_names = _get_data_source_id(target_db)
         # 월별 통계용 속성(열)이 DB에 있으면 채운다. 없으면 건너뛴다.
         candidate_props: dict[str, Any] = {}
         if department:

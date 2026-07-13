@@ -1,4 +1,5 @@
 """전역 설정"""
+import json
 import os
 from pathlib import Path
 from dotenv import load_dotenv
@@ -35,6 +36,24 @@ DEPARTMENTS = [
     for d in os.getenv("NOTION_DEPARTMENTS", "교육부,개발부").split(",")
     if d.strip()
 ]
+
+
+def _load_db_by_department() -> dict[str, str]:
+    """부서(본부)별 Notion DB 매핑. 부서마다 DB를 나눠 접근권한을 분리한다.
+    .env 예) NOTION_DB_BY_DEPARTMENT={"교육부":"db_id_1","개발부":"db_id_2"}
+    매핑에 없는 부서는 기본 NOTION_DATABASE_ID 로 저장된다.
+    """
+    raw = os.getenv("NOTION_DB_BY_DEPARTMENT", "").strip()
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+        return {str(k): str(v).strip() for k, v in data.items() if str(v).strip()}
+    except Exception:
+        return {}
+
+
+NOTION_DB_BY_DEPARTMENT = _load_db_by_department()
 
 SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
 SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
