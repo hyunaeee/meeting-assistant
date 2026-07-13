@@ -155,13 +155,16 @@ def _build_blocks(
     department: str = "",
     registrant: str = "",
     upload_date: str = "",
+    project: str = "",
 ) -> list[dict[str, Any]]:
     blocks: list[dict[str, Any]] = []
 
-    # 상단에 부서 / 등록자 / 등록일 정보 표시
+    # 상단에 부서 / 프로젝트 / 등록자 / 등록일 정보 표시
     info_parts = []
     if department:
         info_parts.append(f"부서: {department}")
+    if project:
+        info_parts.append(f"프로젝트: {project}")
     if registrant:
         info_parts.append(f"등록자: {registrant}")
     if upload_date:
@@ -221,11 +224,13 @@ def upload(
     upload_date: str = "",
     duration_minutes: int = 0,
     database_id: str = "",
+    project: str = "",
 ) -> str:
     base_title = notes.get("title") or f"회의록 {datetime.now().strftime('%Y-%m-%d %H:%M')}"
-    # 제목 앞에 부서를 붙여 Notion 목록에서 바로 구분되게 한다.
-    title = f"[{department}] {base_title}" if department else base_title
-    blocks = _build_blocks(notes, transcript, department, registrant, upload_date)
+    # 제목 앞에 부서(·프로젝트)를 붙여 Notion 목록에서 바로 구분되게 한다.
+    tag = "/".join(x for x in [department, project] if x)
+    title = f"[{tag}] {base_title}" if tag else base_title
+    blocks = _build_blocks(notes, transcript, department, registrant, upload_date, project)
 
     # 부서별 DB가 지정되면 그 DB로, 아니면 기본 DB로 저장한다.
     target_db = database_id or config.NOTION_DATABASE_ID
@@ -235,6 +240,8 @@ def upload(
         candidate_props: dict[str, Any] = {}
         if department:
             candidate_props["부서"] = {"select": {"name": department}}
+        if project:
+            candidate_props["프로젝트"] = {"select": {"name": project}}
         if registrant:
             candidate_props["등록자"] = {"rich_text": [{"text": {"content": registrant}}]}
         if upload_date:

@@ -71,6 +71,7 @@ def _run_meeting_job(
     department: str = "",
     registrant: str = "",
     upload_date: str = "",
+    project: str = "",
 ) -> None:
     try:
         segments: list[dict] = []
@@ -103,6 +104,14 @@ def _run_meeting_job(
                 speaker_labels.append(sp)
         speaker_guess = guess_speaker_mapping(transcript, speaker_labels, participant_list)
 
+        # 저장 대상 DB 결정: 프로젝트 DB > 부서 DB > 기본 DB
+        project_db = ""
+        if project:
+            project_db = (config.NOTION_DB_BY_PROJECT.get(department, {}) or {}).get(project, "")
+        target_db = project_db or config.NOTION_DB_BY_DEPARTMENT.get(department, "")
+
+        duration_minutes = int(round((duration_seconds or 0) / 60))
+
         notion_url = ""
         notion_error = ""
         try:
@@ -112,11 +121,29 @@ def _run_meeting_job(
                 department=department,
                 registrant=registrant,
                 upload_date=upload_date,
-                duration_minutes=int(round((duration_seconds or 0) / 60)),
-                database_id=config.NOTION_DB_BY_DEPARTMENT.get(department, ""),
+                duration_minutes=duration_minutes,
+                database_id=target_db,
+                project=project,
             )
         except Exception as exc:  # noqa: BLE001
             notion_error = str(exc)
+
+        # 대표/전체 DB에도 항상 저장(중복 대상이면 생략)
+        effective_target = target_db or config.NOTION_DATABASE_ID
+        if config.NOTION_ALL_DB and config.NOTION_ALL_DB != effective_target:
+            try:
+                upload_to_notion(
+                    notes,
+                    transcript,
+                    department=department,
+                    registrant=registrant,
+                    upload_date=upload_date,
+                    duration_minutes=duration_minutes,
+                    database_id=config.NOTION_ALL_DB,
+                    project=project,
+                )
+            except Exception as exc:  # noqa: BLE001
+                print(f"[notion] 대표용 전체 DB 저장 실패: {exc}")
 
         result = {
             "meeting_id": meeting_id,
@@ -127,6 +154,7 @@ def _run_meeting_job(
             "notion_url": notion_url,
             "notion_error": notion_error,
             "department": department,
+            "project": project,
             "registrant": registrant,
             "upload_date": upload_date,
             "email_sent": False,
@@ -169,8 +197,11 @@ def health():
 
 @app.get("/api/meetings/departments")
 def departments():
-    """프론트 드롭다운용 부서 목록."""
-    return {"departments": config.DEPARTMENTS}
+    """프론트 드롭다운용 부서 목록 + 부서별 프로젝트 목록."""
+    return {
+        "departments": config.DEPARTMENTS,
+        "projects_by_department": config.NOTION_PROJECTS_BY_DEPARTMENT,
+    }
 
 
 @app.get("/api/stats/monthly")
@@ -218,10 +249,12 @@ async def process_meeting(
     duration_seconds: float = Form(0),
     department: str = Form(""),
     registrant: str = Form(""),
+    project: str = Form(""),
 ):
     # 부서와 등록자는 필수.
     department = department.strip()
     registrant = registrant.strip()
+    project = project.strip()
     if not department:
         return JSONResponse(status_code=400, content={"error": "부서를 선택해주세요."})
     if not registrant:
@@ -258,6 +291,7 @@ async def process_meeting(
             "department": department,
             "registrant": registrant,
             "upload_date": upload_date,
+            "project": project,
         },
         daemon=True,
     )
