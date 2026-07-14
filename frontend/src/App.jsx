@@ -153,7 +153,7 @@ export default function App() {
   const [selectedDepartment, setSelectedDepartment] = useState("");
   const [selectedProject, setSelectedProject] = useState("");
   const [registrant, setRegistrant] = useState("");
-  const [diarizeEnabled, setDiarizeEnabled] = useState(true);
+  const [diarizeEnabled, setDiarizeEnabled] = useState(false);
   const [elapsedSec, setElapsedSec] = useState(0);
   const [etaSec, setEtaSec] = useState(0);
   const [statsOpen, setStatsOpen] = useState(false);
@@ -857,7 +857,7 @@ export default function App() {
               <div className="field">
                 <label className="toggle-row">
                   <input type="checkbox" checked={diarizeEnabled} onChange={(e) => setDiarizeEnabled(e.target.checked)} />
-                  <span><b>화자 구분</b> — 여러 명이 말한 회의에서 화자를 나눔. <span className="toggle-hint">끄면 처리 속도 빨라짐</span></span>
+                  <span><b>화자 구분</b> — 목소리별로 화자를 나눔. <span className="toggle-hint">켜면 매우 느려짐(긴 회의는 비권장). 기본 꺼짐</span></span>
                 </label>
               </div>
 
