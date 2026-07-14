@@ -39,7 +39,7 @@ def transcribe_segments(audio_path: Path):
         str(wav_path),
         language=language,
         vad_filter=True,
-        beam_size=5,
+        beam_size=config.WHISPER_BEAM_SIZE,
     )
 
     out = []

@@ -153,6 +153,9 @@ export default function App() {
   const [selectedDepartment, setSelectedDepartment] = useState("");
   const [selectedProject, setSelectedProject] = useState("");
   const [registrant, setRegistrant] = useState("");
+  const [diarizeEnabled, setDiarizeEnabled] = useState(true);
+  const [elapsedSec, setElapsedSec] = useState(0);
+  const [etaSec, setEtaSec] = useState(0);
   const [statsOpen, setStatsOpen] = useState(false);
   const fileRef = useRef(null);
   const mediaRecorderRef = useRef(null);
@@ -571,6 +574,11 @@ export default function App() {
     setError("");
     setResult(null);
 
+    // 예상 처리 시간(대략): 화자분리 켜면 더 오래. (실제는 하드웨어/길이에 따라 다름)
+    setEtaSec(Math.max(20, Math.round(durationForRequest * (diarizeEnabled ? 0.7 : 0.35))));
+    setElapsedSec(0);
+    const elapsedTimer = window.setInterval(() => setElapsedSec((s) => s + 1), 1000);
+
     const baseLogs = [
       { label: formatDuration(durationForRequest) + "짜리 회의 요약을 시작합니다", status: "done" },
       { label: "녹음 파일 준비", status: "done" },
@@ -610,6 +618,7 @@ export default function App() {
       form.append("department", selectedDepartment);
       form.append("registrant", registrant.trim());
       form.append("project", selectedProject);
+      form.append("diarize", diarizeEnabled ? "true" : "false");
 
       // 1) 업로드 → 즉시 job_id 수신 (요청이 짧아 프록시 60초 타임아웃 회피)
       const startResp = await fetch(API_BASE_URL + "/api/meetings/process", {
@@ -622,11 +631,11 @@ export default function App() {
       }
 
       // 2) 완료될 때까지 상태 폴링 (각 요청도 짧아 타임아웃 안 걸림)
-      const deadlineAt = Date.now() + 30 * 60 * 1000; // 최대 30분 대기
+      const deadlineAt = Date.now() + 60 * 60 * 1000; // 최대 60분 대기
       let data = null;
       while (true) {
         if (Date.now() > deadlineAt) {
-          throw new Error("회의록 생성 시간이 너무 오래 걸립니다. 잠시 후 다시 시도해주세요.");
+          throw new Error("화면 대기 시간이 초과됐어요. 서버는 계속 처리 중일 수 있으니 잠시 후 Notion에서 회의록을 확인해주세요.");
         }
         await new Promise((resolve) => window.setTimeout(resolve, 3000));
         const statusResp = await fetch(
@@ -667,6 +676,7 @@ export default function App() {
       setProcessingLogs((prev) => [...prev.map((log) => log.status === "active" ? { ...log, status: "done" } : log), { label: "회의록 생성 중 오류 발생", status: "error" }]);
     } finally {
       window.clearInterval(progressTimer);
+      window.clearInterval(elapsedTimer);
       setIsProcessing(false);
     }
   };
@@ -845,6 +855,13 @@ export default function App() {
               </div>
 
               <div className="field">
+                <label className="toggle-row">
+                  <input type="checkbox" checked={diarizeEnabled} onChange={(e) => setDiarizeEnabled(e.target.checked)} />
+                  <span><b>화자 구분</b> — 여러 명이 말한 회의에서 화자를 나눔. <span className="toggle-hint">끄면 처리 속도 빨라짐</span></span>
+                </label>
+              </div>
+
+              <div className="field">
                 <FieldLabel title="Notion 저장 위치" />
                 <div className="notion-box">
                   <div className="notion-icon"><FolderOpen size={20} /></div>
@@ -964,7 +981,7 @@ export default function App() {
 
           {step === "setup" && <EmptyState />}
           {step === "recording" && <ProgressPanel recordingState={recordingState} />}
-          {step === "result" && <ResultPanel result={result} notes={notes} participants={participants} emails={emails} error={error} isProcessing={isProcessing} processingLogs={processingLogs} durationLabel={displayDuration} onSendEmail={sendEmailAfterMeeting} isSendingEmail={isSendingEmail} manualEmailStatus={manualEmailStatus} onReset={resetMeeting} />}
+          {step === "result" && <ResultPanel result={result} notes={notes} participants={participants} emails={emails} error={error} isProcessing={isProcessing} processingLogs={processingLogs} durationLabel={displayDuration} elapsedSec={elapsedSec} etaSec={etaSec} onSendEmail={sendEmailAfterMeeting} isSendingEmail={isSendingEmail} manualEmailStatus={manualEmailStatus} onReset={resetMeeting} />}
         </section>
       </section>
     </main>
@@ -1115,7 +1132,7 @@ function StatsModal({ onClose }) {
   );
 }
 
-function ResultPanel({ result, notes, participants, emails, error, isProcessing, processingLogs, durationLabel, onSendEmail, isSendingEmail, manualEmailStatus, onReset }) {
+function ResultPanel({ result, notes, participants, emails, error, isProcessing, processingLogs, durationLabel, elapsedSec = 0, etaSec = 0, onSendEmail, isSendingEmail, manualEmailStatus, onReset }) {
   const [emailComposerOpen, setEmailComposerOpen] = useState(false);
   const [resultEmailInput, setResultEmailInput] = useState("");
   const [resultEmails, setResultEmails] = useState(emails || []);
@@ -1189,7 +1206,16 @@ function ResultPanel({ result, notes, participants, emails, error, isProcessing,
   return <motion.div className="result-grid" initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35 }}>
     <div className="card"><div className="card-inner"><div className="section-title"><div><h3>회의 요약</h3><p>{durationLabel}짜리 회의 요약입니다. 회의록 생성 후 Notion에 자동 저장됩니다.</p></div><ListChecks size={24} color="#64748b" /></div>
       <div className="summary-scroll">
-      {isProcessing && <div className="notice">{durationLabel}짜리 회의를 전사, Claude 요약, Notion 자동 저장 순서로 처리 중입니다.</div>}
+      {isProcessing && <div className="notice">{durationLabel}짜리 회의를 전사 → 화자 구분 → AI 요약 → Notion 저장 순서로 처리 중입니다. 회의가 길면 몇 분~수십 분 걸릴 수 있어요.</div>}
+      {isProcessing && (
+        <div className="progress-meter">
+          <div className="progress-meter-head">
+            <span><Loader2 size={14} className="process-spin" /> 경과 {Math.floor(elapsedSec / 60)}:{String(elapsedSec % 60).padStart(2, "0")}</span>
+            {etaSec > 0 && <span>예상 약 {Math.max(1, Math.round(etaSec / 60))}분</span>}
+          </div>
+          <div className="progress-bar"><div style={{ width: `${etaSec ? Math.min(99, Math.round((elapsedSec / etaSec) * 100)) : 5}%` }} /></div>
+        </div>
+      )}
       {processingLogs?.length > 0 && <ProcessingLog logs={processingLogs} />}
       {!isProcessing && !notes && <div className="notice">아직 생성된 회의록이 없습니다.</div>}
       {sections.map((section) => section.items.length > 0 && <div key={section.title} className="note-block"><h4>{section.title}</h4><ul>{section.items.map((item) => <li key={item}>{item}</li>)}</ul></div>)}

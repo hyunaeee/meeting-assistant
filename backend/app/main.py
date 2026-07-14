@@ -72,18 +72,20 @@ def _run_meeting_job(
     registrant: str = "",
     upload_date: str = "",
     project: str = "",
+    diarize: bool = True,
 ) -> None:
     try:
         segments: list[dict] = []
         with _transcribe_lock:
             try:
                 segments, wav_path = transcribe_segments(audio_path)
-                # 화자 분리(실패해도 화자 없이 진행)
-                try:
-                    turns = diarize_svc.diarize(wav_path)
-                    segments = diarize_svc.assign_speakers(segments, turns)
-                except Exception as exc:  # noqa: BLE001
-                    print(f"[diarize] 화자 분리 실패, 화자 없이 진행: {exc}")
+                # 화자 분리(옵션, 실패해도 화자 없이 진행)
+                if diarize:
+                    try:
+                        turns = diarize_svc.diarize(wav_path)
+                        segments = diarize_svc.assign_speakers(segments, turns)
+                    except Exception as exc:  # noqa: BLE001
+                        print(f"[diarize] 화자 분리 실패, 화자 없이 진행: {exc}")
                 transcript = segments_to_text(segments)
             except Exception as exc:  # noqa: BLE001
                 segments = []
@@ -250,6 +252,7 @@ async def process_meeting(
     department: str = Form(""),
     registrant: str = Form(""),
     project: str = Form(""),
+    diarize: bool = Form(True),
 ):
     # 부서와 등록자는 필수.
     department = department.strip()
@@ -292,6 +295,7 @@ async def process_meeting(
             "registrant": registrant,
             "upload_date": upload_date,
             "project": project,
+            "diarize": diarize,
         },
         daemon=True,
     )

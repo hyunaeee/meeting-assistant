@@ -73,6 +73,18 @@ button, input, textarea, select { font: inherit; }
 .stats-btn:hover { border-color: var(--accent); color: var(--accent-strong); }
 .step-pill { border: 0; border-radius: var(--r-pill); padding: 7px 13px; font-size: 13px; font-weight: 700; color: var(--muted); background: var(--surface-2); transition: .2s; }
 
+/* 화자 구분 토글 */
+.toggle-row { display: flex; align-items: flex-start; gap: 10px; font-size: 13px; color: var(--foreground); line-height: 1.5; cursor: pointer; }
+.toggle-row input[type="checkbox"] { width: 18px; height: 18px; margin-top: 1px; accent-color: var(--accent); flex: none; cursor: pointer; }
+.toggle-hint { color: var(--accent-strong); font-weight: 600; }
+
+/* 처리 진행 표시 (경과/예상) */
+.progress-meter { margin: 4px 0 12px; }
+.progress-meter-head { display: flex; justify-content: space-between; font-size: 13px; font-weight: 700; color: var(--foreground); margin-bottom: 6px; }
+.progress-meter-head span { display: inline-flex; align-items: center; gap: 6px; }
+.progress-bar { height: 8px; border-radius: var(--r-pill); background: var(--surface-2); overflow: hidden; }
+.progress-bar > div { height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--accent), var(--accent-strong)); transition: width .5s ease; }
+
 /* 이용 통계 모달 */
 .modal-overlay { position: fixed; inset: 0; z-index: 50; background: rgba(15,23,42,.45); backdrop-filter: blur(4px); display: grid; place-items: center; padding: 20px; }
 .modal-card { width: 100%; max-width: 460px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-xl); box-shadow: var(--shadow-lg); padding: 22px; }
