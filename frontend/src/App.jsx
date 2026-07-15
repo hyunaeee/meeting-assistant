@@ -151,6 +151,10 @@ export default function App() {
   const [departments, setDepartments] = useState([]);
   const [selectedDepartment, setSelectedDepartment] = useState("");
   const [registrant, setRegistrant] = useState("");
+  const [meetingDate, setMeetingDate] = useState(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  });
   const [diarizeEnabled, setDiarizeEnabled] = useState(true);
   const [summaryLang, setSummaryLang] = useState("ko");
   const [elapsedSec, setElapsedSec] = useState(0);
@@ -611,6 +615,7 @@ export default function App() {
       form.append("duration_seconds", String(durationForRequest || 0));
       form.append("department", selectedDepartment);
       form.append("registrant", registrant.trim());
+      form.append("meeting_date", meetingDate || "");
       form.append("diarize", diarizeEnabled ? "true" : "false");
       form.append("summary_lang", summaryLang);
 
@@ -830,6 +835,17 @@ export default function App() {
                   onChange={(e) => setRegistrant(e.target.value)}
                   placeholder="회의록을 등록하는 사람 이름"
                 />
+              </div>
+
+              <div className="field">
+                <FieldLabel title="회의 일자" />
+                <input
+                  className="input"
+                  type="date"
+                  value={meetingDate}
+                  onChange={(e) => setMeetingDate(e.target.value)}
+                />
+                <p className="help">실제 회의가 열린 날짜입니다. (등록일과 별도로 기록)</p>
               </div>
 
               <div className="field">

@@ -71,6 +71,7 @@ def _run_meeting_job(
     department: str = "",
     registrant: str = "",
     upload_date: str = "",
+    meeting_date: str = "",
     diarize: bool = True,
     summary_lang: str = "ko",
 ) -> None:
@@ -120,6 +121,7 @@ def _run_meeting_job(
                 department=department,
                 registrant=registrant,
                 upload_date=upload_date,
+                meeting_date=meeting_date,
                 duration_minutes=duration_minutes,
                 database_id=target_db,
             )
@@ -136,6 +138,7 @@ def _run_meeting_job(
                     department=department,
                     registrant=registrant,
                     upload_date=upload_date,
+                    meeting_date=meeting_date,
                     duration_minutes=duration_minutes,
                     database_id=config.NOTION_ALL_DB,
                 )
@@ -153,6 +156,7 @@ def _run_meeting_job(
             "department": department,
             "registrant": registrant,
             "upload_date": upload_date,
+            "meeting_date": meeting_date,
             "email_sent": False,
             "email_error": "",
             "duration_seconds": duration_seconds,
@@ -242,12 +246,14 @@ async def process_meeting(
     duration_seconds: float = Form(0),
     department: str = Form(""),
     registrant: str = Form(""),
+    meeting_date: str = Form(""),
     diarize: bool = Form(True),
     summary_lang: str = Form("ko"),
 ):
     # 부서와 등록자는 필수.
     department = department.strip()
     registrant = registrant.strip()
+    meeting_date = meeting_date.strip()
     if not department:
         return JSONResponse(status_code=400, content={"error": "부서를 선택해주세요."})
     if not registrant:
@@ -284,6 +290,7 @@ async def process_meeting(
             "department": department,
             "registrant": registrant,
             "upload_date": upload_date,
+            "meeting_date": meeting_date,
             "diarize": diarize,
             "summary_lang": summary_lang,
         },
