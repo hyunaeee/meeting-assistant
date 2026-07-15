@@ -153,7 +153,7 @@ export default function App() {
   const [selectedDepartment, setSelectedDepartment] = useState("");
   const [selectedProject, setSelectedProject] = useState("");
   const [registrant, setRegistrant] = useState("");
-  const [diarizeEnabled, setDiarizeEnabled] = useState(false);
+  const [diarizeEnabled, setDiarizeEnabled] = useState(true);
   const [elapsedSec, setElapsedSec] = useState(0);
   const [etaSec, setEtaSec] = useState(0);
   const [statsOpen, setStatsOpen] = useState(false);
@@ -575,7 +575,7 @@ export default function App() {
     setResult(null);
 
     // 예상 처리 시간(대략): 화자분리 켜면 더 오래. (실제는 하드웨어/길이에 따라 다름)
-    setEtaSec(Math.max(20, Math.round(durationForRequest * (diarizeEnabled ? 0.7 : 0.35))));
+    setEtaSec(Math.max(20, Math.round(durationForRequest * (diarizeEnabled ? 0.15 : 0.12))));
     setElapsedSec(0);
     const elapsedTimer = window.setInterval(() => setElapsedSec((s) => s + 1), 1000);
 
@@ -857,7 +857,7 @@ export default function App() {
               <div className="field">
                 <label className="toggle-row">
                   <input type="checkbox" checked={diarizeEnabled} onChange={(e) => setDiarizeEnabled(e.target.checked)} />
-                  <span><b>화자 구분</b> — 목소리별로 화자를 나눔. <span className="toggle-hint">켜면 매우 느려짐(긴 회의는 비권장). 기본 꺼짐</span></span>
+                  <span><b>화자 구분</b> — 목소리별로 화자를 나눠 표시. <span className="toggle-hint">거의 안 느려짐 · 기본 켜짐</span></span>
                 </label>
               </div>
 
