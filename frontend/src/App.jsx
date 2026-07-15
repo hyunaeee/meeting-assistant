@@ -31,6 +31,19 @@ import {
 } from "lucide-react";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
+
+// 구글 로그인 토큰(모든 API 호출에 첨부)
+let AUTH_TOKEN = (typeof localStorage !== "undefined" && localStorage.getItem("id_token")) || null;
+function authHeaders() {
+  return AUTH_TOKEN ? { Authorization: "Bearer " + AUTH_TOKEN } : {};
+}
+function setAuthToken(t) {
+  AUTH_TOKEN = t || null;
+  if (typeof localStorage !== "undefined") {
+    if (t) localStorage.setItem("id_token", t);
+    else localStorage.removeItem("id_token");
+  }
+}
 const DEFAULT_NOTION_LOCATION = "LIKE Notion AI 회의록";
 const DEFAULT_NOTION_DESCRIPTION = "기본 회의록 페이지";
 const NEW_LINE = String.fromCharCode(10);
@@ -160,6 +173,73 @@ export default function App() {
   const [elapsedSec, setElapsedSec] = useState(0);
   const [etaSec, setEtaSec] = useState(0);
   const [statsOpen, setStatsOpen] = useState(false);
+  const [authCfg, setAuthCfg] = useState(null);
+  const [currentUser, setCurrentUser] = useState(null);
+  const [authChecked, setAuthChecked] = useState(false);
+  const [listOpen, setListOpen] = useState(false);
+  const [gisReady, setGisReady] = useState(false);
+
+  // 로그인 설정 로드 + (필요 시) 구글 로그인 초기화
+  useEffect(() => {
+    fetch(API_BASE_URL + "/api/auth/config")
+      .then((r) => r.json())
+      .then((cfg) => {
+        setAuthCfg(cfg);
+        if (!cfg.auth_enabled) { setAuthChecked(true); return; }
+        if (AUTH_TOKEN) {
+          fetch(API_BASE_URL + "/api/auth/me", { headers: authHeaders() })
+            .then((r) => (r.ok ? r.json() : Promise.reject()))
+            .then((me) => { if (me.email) setCurrentUser(me); else setAuthToken(null); })
+            .catch(() => setAuthToken(null))
+            .finally(() => setAuthChecked(true));
+        } else {
+          setAuthChecked(true);
+        }
+        if (cfg.google_client_id) loadGoogleSignIn(cfg.google_client_id);
+      })
+      .catch(() => { setAuthCfg({ auth_enabled: false }); setAuthChecked(true); });
+  }, []);
+
+  const loadGoogleSignIn = (clientId) => {
+    const init = () => {
+      if (!window.google?.accounts?.id) return;
+      window.google.accounts.id.initialize({
+        client_id: clientId,
+        callback: (resp) => {
+          setAuthToken(resp.credential);
+          fetch(API_BASE_URL + "/api/auth/me", { headers: authHeaders() })
+            .then((r) => (r.ok ? r.json() : Promise.reject()))
+            .then((me) => { if (me.email) { setCurrentUser(me); setError(""); } })
+            .catch(() => { setAuthToken(null); setError("허용되지 않은 계정이거나 로그인에 실패했습니다."); });
+        },
+      });
+      setGisReady(true);
+    };
+    if (window.google?.accounts?.id) { init(); return; }
+    if (document.getElementById("gsi-script")) return;
+    const s = document.createElement("script");
+    s.id = "gsi-script";
+    s.src = "https://accounts.google.com/gsi/client";
+    s.async = true;
+    s.onload = init;
+    document.head.appendChild(s);
+  };
+
+  // 로그인 화면이 보일 때 구글 버튼 렌더
+  useEffect(() => {
+    if (gisReady && authCfg?.auth_enabled && authChecked && !currentUser) {
+      const el = document.getElementById("gsi-button");
+      if (el && !el.hasChildNodes()) {
+        window.google.accounts.id.renderButton(el, { theme: "outline", size: "large", text: "signin_with", locale: "ko", width: 280 });
+      }
+    }
+  }, [gisReady, authCfg, authChecked, currentUser]);
+
+  const logout = () => {
+    setAuthToken(null);
+    setCurrentUser(null);
+    if (window.google?.accounts?.id) window.google.accounts.id.disableAutoSelect();
+  };
   const fileRef = useRef(null);
   const mediaRecorderRef = useRef(null);
   const mediaStreamRef = useRef(null);
@@ -181,7 +261,7 @@ export default function App() {
 
   // 부서 목록을 불러온다.
   useEffect(() => {
-    fetch(API_BASE_URL + "/api/meetings/departments")
+    fetch(API_BASE_URL + "/api/meetings/departments", { headers: authHeaders() })
       .then((r) => r.json())
       .then((d) => setDepartments(Array.isArray(d.departments) ? d.departments : []))
       .catch(() => setDepartments([]));
@@ -623,6 +703,7 @@ export default function App() {
       const startResp = await fetch(API_BASE_URL + "/api/meetings/process", {
         method: "POST",
         body: form,
+        headers: authHeaders(),
       });
       const startData = await startResp.json();
       if (!startResp.ok || !startData.job_id) {
@@ -638,7 +719,7 @@ export default function App() {
         }
         await new Promise((resolve) => window.setTimeout(resolve, 3000));
         const statusResp = await fetch(
-          API_BASE_URL + "/api/meetings/status/" + startData.job_id
+          API_BASE_URL + "/api/meetings/status/" + startData.job_id, { headers: authHeaders() }
         );
         const statusData = await statusResp.json();
         if (statusResp.status === 404) {
@@ -699,7 +780,7 @@ export default function App() {
     try {
       const response = await fetch(API_BASE_URL + "/api/meetings/send-email", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...authHeaders() },
         body: JSON.stringify({
           emails: mergedEmails,
           notes: result.notes,
@@ -745,6 +826,27 @@ export default function App() {
     setError("");
   };
 
+  // 로그인 필수인데 아직 로그인 안 했으면 로그인 화면
+  if (authCfg?.auth_enabled && authChecked && !currentUser) {
+    return (
+      <main className="bg">
+        <div className="blur-a" />
+        <div className="blur-b" />
+        <div className="blur-c" />
+        <div className="login-gate">
+          <div className="login-card">
+            <div className="logo-icon" style={{ width: 56, height: 56, margin: "0 auto 18px" }}><Mic size={26} /></div>
+            <h1 className="h2" style={{ fontSize: 24 }}>LIKE meeting assistant</h1>
+            <p className="help" style={{ marginBottom: 22 }}>회사 구글 계정으로 로그인하세요. 본인이 만든 회의록만 볼 수 있습니다.</p>
+            <div id="gsi-button" style={{ display: "flex", justifyContent: "center" }} />
+            {!gisReady && <p className="help" style={{ marginTop: 14 }}><Loader2 size={14} className="process-spin" /> 로그인 버튼 불러오는 중…</p>}
+            {error && <div className="error" style={{ marginTop: 16 }}>{error}</div>}
+          </div>
+        </div>
+      </main>
+    );
+  }
+
   return (
     <main className="bg">
       <div className="blur-a" />
@@ -761,7 +863,14 @@ export default function App() {
             </div>
           </div>
           <div className="header-right">
+            {currentUser && <button className="stats-btn" type="button" onClick={() => setListOpen(true)}><FileText size={16} /> 회의록 목록</button>}
             <button className="stats-btn" type="button" onClick={() => setStatsOpen(true)}><BarChart3 size={16} /> 이용 통계</button>
+            {currentUser && (
+              <span className="user-chip" title={currentUser.email}>
+                {currentUser.name}{currentUser.role === "ceo" ? " · 대표" : currentUser.role === "head" ? ` · ${currentUser.department} 본부장` : ""}
+                <button className="logout-btn" type="button" onClick={logout}>로그아웃</button>
+              </span>
+            )}
             <div className="steps">
               <StepPill active={step === "setup"} done={step !== "setup"} label="설정" />
               <ChevronRight size={16} color="#cbd5e1" />
@@ -773,6 +882,7 @@ export default function App() {
         </div>
       </header>
       {statsOpen && <StatsModal onClose={() => setStatsOpen(false)} />}
+      {listOpen && <MeetingsListModal onClose={() => setListOpen(false)} currentUser={currentUser} />}
 
       <section className={"container" + (step === "result" ? " container-result" : "")}>
         {step !== "result" && (
@@ -1086,12 +1196,58 @@ function ProcessingLog({ logs }) {
   </div>;
 }
 
+function MeetingsListModal({ onClose, currentUser }) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetch(API_BASE_URL + "/api/meetings/list", { headers: authHeaders() })
+      .then((r) => r.json())
+      .then((d) => { setData(d); setLoading(false); })
+      .catch(() => { setData({ meetings: [] }); setLoading(false); });
+  }, []);
+
+  const scope = currentUser?.role === "ceo" ? "전체" : currentUser?.role === "head" ? `${currentUser.department} 본부` : "내가 등록한";
+  const meetings = data?.meetings || [];
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 560 }}>
+        <div className="modal-head">
+          <div>
+            <h3 className="h2" style={{ fontSize: 22 }}>회의록 목록</h3>
+            <p className="help">{scope} 회의록{data ? ` · ${meetings.length}건` : ""}</p>
+          </div>
+          <button className="modal-close" type="button" onClick={onClose} aria-label="닫기"><X size={18} /></button>
+        </div>
+        {loading ? (
+          <p className="help" style={{ padding: "12px 0" }}><Loader2 size={15} className="process-spin" /> 불러오는 중…</p>
+        ) : meetings.length === 0 ? (
+          <p className="help" style={{ padding: "12px 0" }}>볼 수 있는 회의록이 없습니다.</p>
+        ) : (
+          <div className="stats-scroll">
+            {meetings.map((m) => (
+              <div key={m.meeting_id} className="list-row">
+                <div className="list-row-main">
+                  <b>{m.title}</b>
+                  <span className="list-row-meta">{m.department}{m.registrant ? " · " + m.registrant : ""}{m.meeting_date ? " · " + m.meeting_date : ""}</span>
+                </div>
+                {m.notion_url && <a className="list-open" href={m.notion_url} target="_blank" rel="noreferrer">열기 <ExternalLink size={13} /></a>}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function StatsModal({ onClose }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch(API_BASE_URL + "/api/stats/monthly")
+    fetch(API_BASE_URL + "/api/stats/monthly", { headers: authHeaders() })
       .then((r) => r.json())
       .then((d) => { setData(d); setLoading(false); })
       .catch(() => { setData({ months: [], total_count: 0 }); setLoading(false); });

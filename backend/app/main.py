@@ -7,12 +7,13 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, File, Form, UploadFile
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from app import config
+from app.services import auth as auth_svc
 from app.services.claude import guess_speaker_mapping, summarize_transcript
 from app.services.emailer import send_meeting_email
 from app.services.notion import upload as upload_to_notion
@@ -50,6 +51,24 @@ app.add_middleware(
 )
 
 
+def get_current_user(authorization: Optional[str] = Header(None)) -> Optional[dict]:
+    """구글 로그인 사용자. AUTH_ENABLED=false 면 None(무로그인). 켜졌는데 토큰 없거나
+    유효하지 않으면 401/403."""
+    if not config.AUTH_ENABLED:
+        return None
+    if not authorization or not authorization.lower().startswith("bearer "):
+        raise HTTPException(status_code=401, detail="로그인이 필요합니다.")
+    token = authorization.split(" ", 1)[1].strip()
+    try:
+        user = auth_svc.verify_google_token(token)
+    except Exception:
+        raise HTTPException(status_code=401, detail="유효하지 않은 로그인입니다. 다시 로그인해주세요.")
+    if not auth_svc.is_allowed(user["email"]):
+        raise HTTPException(status_code=403, detail="접근이 허용되지 않은 계정입니다.")
+    user.update(auth_svc.role_for(user["email"]))
+    return user
+
+
 # ── 비동기 회의록 처리용 인메모리 job 저장소 ──────────────────────────────
 # process 요청은 즉시 job_id 만 돌려주고, 실제 처리는 백그라운드 스레드에서 수행한다.
 # 프론트는 /api/meetings/status/{job_id} 를 폴링한다. 각 요청이 짧아 프록시 60초
@@ -74,6 +93,8 @@ def _run_meeting_job(
     meeting_date: str = "",
     diarize: bool = True,
     summary_lang: str = "ko",
+    creator_email: str = "",
+    creator_name: str = "",
 ) -> None:
     try:
         segments: list[dict] = []
@@ -157,6 +178,8 @@ def _run_meeting_job(
             "registrant": registrant,
             "upload_date": upload_date,
             "meeting_date": meeting_date,
+            "creator_email": creator_email,
+            "creator_name": creator_name,
             "email_sent": False,
             "email_error": "",
             "duration_seconds": duration_seconds,
@@ -199,6 +222,48 @@ def health():
 def departments():
     """프론트 드롭다운용 부서 목록."""
     return {"departments": config.DEPARTMENTS}
+
+
+@app.get("/api/auth/config")
+def auth_config():
+    """프론트가 로그인 필요 여부/Client ID 를 알 수 있게 공개."""
+    return {"auth_enabled": config.AUTH_ENABLED, "google_client_id": config.GOOGLE_CLIENT_ID}
+
+
+@app.get("/api/auth/me")
+def auth_me(user: Optional[dict] = Depends(get_current_user)):
+    """현재 로그인 사용자와 역할."""
+    if not config.AUTH_ENABLED:
+        return {"auth_enabled": False}
+    return {"auth_enabled": True, **(user or {})}
+
+
+@app.get("/api/meetings/list")
+def meetings_list(user: Optional[dict] = Depends(get_current_user)):
+    """권한에 맞는 회의록 목록. 대표=전체 / 본부장=본부 / 개인=본인 것."""
+    items = []
+    for path in config.STORAGE_DIR.glob("*.json"):
+        if path.name.endswith("_notes.json"):
+            continue
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001
+            continue
+        if config.AUTH_ENABLED and user and not auth_svc.can_view(user["email"], data):
+            continue
+        items.append({
+            "meeting_id": data.get("meeting_id"),
+            "title": (data.get("notes") or {}).get("title") or "회의록",
+            "department": data.get("department") or "",
+            "registrant": data.get("registrant") or "",
+            "creator_email": data.get("creator_email") or "",
+            "meeting_date": data.get("meeting_date") or "",
+            "upload_date": data.get("upload_date") or "",
+            "duration_seconds": data.get("duration_seconds") or 0,
+            "notion_url": data.get("notion_url") or "",
+        })
+    items.sort(key=lambda x: str(x.get("meeting_id") or ""), reverse=True)
+    return {"meetings": items, "count": len(items)}
 
 
 @app.get("/api/stats/monthly")
@@ -249,11 +314,14 @@ async def process_meeting(
     meeting_date: str = Form(""),
     diarize: bool = Form(True),
     summary_lang: str = Form("ko"),
+    user: Optional[dict] = Depends(get_current_user),
 ):
     # 부서와 등록자는 필수.
     department = department.strip()
     registrant = registrant.strip()
     meeting_date = meeting_date.strip()
+    creator_email = (user or {}).get("email", "")
+    creator_name = (user or {}).get("name", "")
     if not department:
         return JSONResponse(status_code=400, content={"error": "부서를 선택해주세요."})
     if not registrant:
@@ -293,6 +361,8 @@ async def process_meeting(
             "meeting_date": meeting_date,
             "diarize": diarize,
             "summary_lang": summary_lang,
+            "creator_email": creator_email,
+            "creator_name": creator_name,
         },
         daemon=True,
     )

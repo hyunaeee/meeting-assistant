@@ -69,6 +69,34 @@ SMTP_FROM = os.getenv("SMTP_FROM") or SMTP_USER
 
 HF_TOKEN = os.getenv("HF_TOKEN", "")
 
+# ── 구글 로그인 / 권한 ─────────────────────────────────────────────
+# AUTH_ENABLED=true 일 때만 로그인 필수 + 권한 필터 동작. 미설정이면 지금처럼 무로그인.
+AUTH_ENABLED = os.getenv("AUTH_ENABLED", "false").strip().lower() in ("1", "true", "yes")
+GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "").strip()
+# 로그인 허용 이메일 도메인(예: likecorp.co.kr). 비우면 도메인 제한 없음.
+ALLOWED_EMAIL_DOMAIN = os.getenv("ALLOWED_EMAIL_DOMAIN", "").strip().lower()
+# 도메인 밖이어도 허용할 개별 이메일(예: 관리자 gmail). 콤마 구분.
+EXTRA_ALLOWED_EMAILS = [e.strip().lower() for e in os.getenv("EXTRA_ALLOWED_EMAILS", "").split(",") if e.strip()]
+# 대표(전체 열람) 이메일. 콤마 구분.
+CEO_EMAILS = [e.strip().lower() for e in os.getenv("CEO_EMAILS", "").split(",") if e.strip()]
+
+
+def _load_department_heads() -> dict[str, str]:
+    """본부장 매핑 {이메일: 부서}. 그 이메일은 해당 부서 전체를 열람한다.
+    .env 예) DEPARTMENT_HEADS={"kim@likecorp.co.kr":"개발사업본부"}
+    """
+    raw = os.getenv("DEPARTMENT_HEADS", "").strip()
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+        return {str(k).strip().lower(): str(v).strip() for k, v in data.items()}
+    except Exception:
+        return {}
+
+
+DEPARTMENT_HEADS = _load_department_heads()
+
 # 화자분리: 긴 오디오는 클러스터링이 O(n²)로 폭발하므로 청크로 나눠 처리 후 화자 병합.
 DIARIZE_CHUNK_SEC = int(os.getenv("DIARIZE_CHUNK_SEC", "300"))          # 청크 길이(초)
 DIARIZE_MERGE_THRESHOLD = float(os.getenv("DIARIZE_MERGE_THRESHOLD", "0.5"))  # 화자 병합 코사인 유사도 기준
