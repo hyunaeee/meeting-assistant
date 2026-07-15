@@ -85,3 +85,7 @@ SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
 SMTP_FROM = os.getenv("SMTP_FROM") or SMTP_USER
 
 HF_TOKEN = os.getenv("HF_TOKEN", "")
+
+# 화자분리: 긴 오디오는 클러스터링이 O(n²)로 폭발하므로 청크로 나눠 처리 후 화자 병합.
+DIARIZE_CHUNK_SEC = int(os.getenv("DIARIZE_CHUNK_SEC", "300"))          # 청크 길이(초)
+DIARIZE_MERGE_THRESHOLD = float(os.getenv("DIARIZE_MERGE_THRESHOLD", "0.5"))  # 화자 병합 코사인 유사도 기준
