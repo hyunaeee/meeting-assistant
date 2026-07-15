@@ -33,7 +33,7 @@ SYSTEM_PROMPT = """당신은 회의록 정리 전문가입니다.
 규칙:
 - 참석자 이름이 transcript에서 명확하지 않으면 빈 배열 반환
 - 추측하지 말고 transcript에 있는 내용만 사용
-- 한국어로 작성
+- 출력 언어는 사용자 프롬프트의 지시를 따른다
 - key_points와 decisions는 명확히 구분 (논의 vs 합의)
 """
 
@@ -98,7 +98,7 @@ def _json_from_text(text: str) -> dict[str, Any]:
     return json.loads(stripped)
 
 
-def summarize_transcript(transcript: str, meeting_title: str = "", participants: list[str] | None = None) -> dict[str, Any]:
+def summarize_transcript(transcript: str, meeting_title: str = "", participants: list[str] | None = None, language: str = "ko") -> dict[str, Any]:
     if not config.ANTHROPIC_API_KEY:
         notes = dict(EMPTY_NOTES)
         notes["title"] = meeting_title or "회의록"
@@ -107,10 +107,19 @@ def summarize_transcript(transcript: str, meeting_title: str = "", participants:
         notes["key_points"] = ["전사본은 생성되었지만 Claude 요약 API 키가 없어 구조화 요약을 생성하지 못했습니다."]
         return notes
 
+    lang_instruction = (
+        "Write ALL meeting-note content (title, summary, agenda, key_points, decisions, "
+        "action items, open_questions, etc.) in ENGLISH, regardless of the transcript's language."
+        if language == "en"
+        else "회의록의 모든 내용(제목·요약·안건·핵심논의·결정사항·액션아이템 등)을 한국어로 작성하세요."
+    )
+
     client = Anthropic(api_key=config.ANTHROPIC_API_KEY)
     user_prompt = f"""
 회의 제목 후보: {meeting_title or "없음"}
 사용자가 UI에서 명시 입력한 참석자 목록: {", ".join(participants or []) or "없음"}
+
+출력 언어 지시: {lang_instruction}
 
 참석자 목록이 제공된 경우 transcript에 직접 언급되지 않아도 회의 메타데이터로 간주하여 attendees에 반드시 포함하세요.
 아래 전사본을 분석해서 지정된 JSON 스키마로만 응답하세요.

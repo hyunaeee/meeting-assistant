@@ -18,7 +18,8 @@ CHANNELS = 1
 WHISPER_MODEL = os.getenv("WHISPER_MODEL", "large-v3")
 WHISPER_DEVICE = os.getenv("WHISPER_DEVICE", "cuda")
 WHISPER_COMPUTE_TYPE = os.getenv("WHISPER_COMPUTE_TYPE", "float16")
-WHISPER_LANGUAGE = os.getenv("WHISPER_LANGUAGE", "ko")
+# 비우면 자동 감지(영어 회의는 영어로, 한국어 회의는 한국어로 전사)
+WHISPER_LANGUAGE = os.getenv("WHISPER_LANGUAGE", "")
 # 전사 속도/정확도 트레이드오프. 1이면 빠름(그리디), 5면 느리고 약간 정확.
 WHISPER_BEAM_SIZE = int(os.getenv("WHISPER_BEAM_SIZE", "1"))
 

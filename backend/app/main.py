@@ -73,6 +73,7 @@ def _run_meeting_job(
     upload_date: str = "",
     project: str = "",
     diarize: bool = True,
+    summary_lang: str = "ko",
 ) -> None:
     try:
         segments: list[dict] = []
@@ -95,7 +96,7 @@ def _run_meeting_job(
         # 오인하지 않고 대화 내용에서 실제 이름을 찾도록 한다.
         plain_transcript = segments_to_text(segments, include_speaker=False) if segments else transcript
         notes = summarize_transcript(
-            plain_transcript, meeting_title=title, participants=participant_list
+            plain_transcript, meeting_title=title, participants=participant_list, language=summary_lang
         )
 
         # 등장 순서대로 고유 화자 목록 → 대화 내용으로 참가자 추측 매핑(best-effort)
@@ -253,6 +254,7 @@ async def process_meeting(
     registrant: str = Form(""),
     project: str = Form(""),
     diarize: bool = Form(True),
+    summary_lang: str = Form("ko"),
 ):
     # 부서와 등록자는 필수.
     department = department.strip()
@@ -296,6 +298,7 @@ async def process_meeting(
             "upload_date": upload_date,
             "project": project,
             "diarize": diarize,
+            "summary_lang": summary_lang,
         },
         daemon=True,
     )

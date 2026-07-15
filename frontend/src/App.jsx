@@ -154,6 +154,7 @@ export default function App() {
   const [selectedProject, setSelectedProject] = useState("");
   const [registrant, setRegistrant] = useState("");
   const [diarizeEnabled, setDiarizeEnabled] = useState(true);
+  const [summaryLang, setSummaryLang] = useState("ko");
   const [elapsedSec, setElapsedSec] = useState(0);
   const [etaSec, setEtaSec] = useState(0);
   const [statsOpen, setStatsOpen] = useState(false);
@@ -619,6 +620,7 @@ export default function App() {
       form.append("registrant", registrant.trim());
       form.append("project", selectedProject);
       form.append("diarize", diarizeEnabled ? "true" : "false");
+      form.append("summary_lang", summaryLang);
 
       // 1) 업로드 → 즉시 job_id 수신 (요청이 짧아 프록시 60초 타임아웃 회피)
       const startResp = await fetch(API_BASE_URL + "/api/meetings/process", {
@@ -852,6 +854,15 @@ export default function App() {
                   onChange={(e) => setRegistrant(e.target.value)}
                   placeholder="회의록을 등록하는 사람 이름"
                 />
+              </div>
+
+              <div className="field">
+                <FieldLabel title="회의록 언어" />
+                <select className="input" value={summaryLang} onChange={(e) => setSummaryLang(e.target.value)}>
+                  <option value="ko">한국어</option>
+                  <option value="en">English</option>
+                </select>
+                <p className="help">요약 회의록을 작성할 언어입니다. (전사본은 말한 언어 그대로 유지)</p>
               </div>
 
               <div className="field">
