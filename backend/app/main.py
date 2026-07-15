@@ -266,6 +266,21 @@ def meetings_list(user: Optional[dict] = Depends(get_current_user)):
     return {"meetings": items, "count": len(items)}
 
 
+@app.get("/api/meetings/detail/{meeting_id}")
+def meeting_detail(meeting_id: str, user: Optional[dict] = Depends(get_current_user)):
+    """회의록 전체 내용(요약·전사). 권한 있는 사람만."""
+    path = config.STORAGE_DIR / f"{meeting_id}.json"
+    if not path.exists():
+        return JSONResponse(status_code=404, content={"error": "회의록을 찾을 수 없습니다."})
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        return JSONResponse(status_code=500, content={"error": "회의록을 읽을 수 없습니다."})
+    if config.AUTH_ENABLED and user and not auth_svc.can_view(user["email"], data):
+        raise HTTPException(status_code=403, detail="이 회의록을 볼 권한이 없습니다.")
+    return data
+
+
 @app.get("/api/stats/monthly")
 def monthly_stats():
     """저장된 회의록 기록을 월 단위로 집계한다."""

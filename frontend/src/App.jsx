@@ -1199,6 +1199,8 @@ function ProcessingLog({ logs }) {
 function MeetingsListModal({ onClose, currentUser }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [selected, setSelected] = useState(null);
+  const [detailLoading, setDetailLoading] = useState(false);
 
   useEffect(() => {
     fetch(API_BASE_URL + "/api/meetings/list", { headers: authHeaders() })
@@ -1207,16 +1209,85 @@ function MeetingsListModal({ onClose, currentUser }) {
       .catch(() => { setData({ meetings: [] }); setLoading(false); });
   }, []);
 
+  const openDetail = (id) => {
+    setDetailLoading(true);
+    setSelected({ loading: true });
+    fetch(API_BASE_URL + "/api/meetings/detail/" + id, { headers: authHeaders() })
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
+      .then((d) => setSelected(d))
+      .catch(() => setSelected({ error: "회의록을 열 수 없습니다." }))
+      .finally(() => setDetailLoading(false));
+  };
+
   const scope = currentUser?.role === "ceo" ? "전체" : currentUser?.role === "head" ? `${currentUser.department} 본부` : "내가 등록한";
   const meetings = data?.meetings || [];
 
+  // ── 상세 보기 ──
+  if (selected) {
+    const notes = selected.notes || {};
+    const segments = Array.isArray(selected.segments) ? selected.segments : [];
+    const turns = [];
+    for (const s of segments) {
+      const last = turns[turns.length - 1];
+      if (last && last.speaker === s.speaker) last.texts.push(s.text);
+      else turns.push({ speaker: s.speaker || "", texts: [s.text] });
+    }
+    const sections = [
+      { title: "요약", items: notes.summary ? [notes.summary] : [] },
+      { title: "참석자", items: notes.attendees || [] },
+      { title: "안건", items: notes.agenda || [] },
+      { title: "핵심 논의", items: notes.key_points || [] },
+      { title: "결정사항", items: notes.decisions || [] },
+      { title: "추가 논의 필요", items: notes.open_questions || [] },
+    ];
+    return (
+      <div className="modal-overlay" onClick={onClose}>
+        <div className="modal-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 620 }}>
+          <div className="modal-head">
+            <div style={{ minWidth: 0 }}>
+              <button className="back-btn" type="button" onClick={() => setSelected(null)}>← 목록</button>
+              <h3 className="h2" style={{ fontSize: 20, marginTop: 8 }}>{notes.title || "회의록"}</h3>
+              <p className="help">{[selected.department, selected.registrant, selected.meeting_date || selected.upload_date].filter(Boolean).join(" · ")}</p>
+            </div>
+            <button className="modal-close" type="button" onClick={onClose} aria-label="닫기"><X size={18} /></button>
+          </div>
+          {selected.loading || detailLoading ? (
+            <p className="help" style={{ padding: "12px 0" }}><Loader2 size={15} className="process-spin" /> 불러오는 중…</p>
+          ) : selected.error ? (
+            <div className="error">{selected.error}</div>
+          ) : (
+            <div className="stats-scroll" style={{ maxHeight: "66vh" }}>
+              {sections.map((sec) => sec.items.length > 0 && (
+                <div key={sec.title} className="note-block"><h4>{sec.title}</h4><ul>{sec.items.map((it, i) => <li key={i}>{it}</li>)}</ul></div>
+              ))}
+              {notes.action_items?.length > 0 && (
+                <div className="note-block"><h4>액션 아이템</h4><ul>{notes.action_items.map((it, i) => <li key={i}>{it.task} (담당: {it.owner || "미정"} / 기한: {it.due || "미정"})</li>)}</ul></div>
+              )}
+              {turns.length > 0 && (
+                <div className="note-block"><h4>전사</h4>
+                  {turns.map((t, i) => (
+                    <div key={i} style={{ marginBottom: 8 }}>
+                      {t.speaker && <span className="speaker">{t.speaker}</span>}
+                      <p className="help" style={{ margin: "4px 0 0" }}>{t.texts.join(" ")}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // ── 목록 ──
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 560 }}>
         <div className="modal-head">
           <div>
             <h3 className="h2" style={{ fontSize: 22 }}>회의록 목록</h3>
-            <p className="help">{scope} 회의록{data ? ` · ${meetings.length}건` : ""}</p>
+            <p className="help">{scope} 회의록{data ? ` · ${meetings.length}건` : ""} · 클릭하면 내용을 볼 수 있어요</p>
           </div>
           <button className="modal-close" type="button" onClick={onClose} aria-label="닫기"><X size={18} /></button>
         </div>
@@ -1227,13 +1298,13 @@ function MeetingsListModal({ onClose, currentUser }) {
         ) : (
           <div className="stats-scroll">
             {meetings.map((m) => (
-              <div key={m.meeting_id} className="list-row">
+              <button key={m.meeting_id} type="button" className="list-row list-row-btn" onClick={() => openDetail(m.meeting_id)}>
                 <div className="list-row-main">
                   <b>{m.title}</b>
                   <span className="list-row-meta">{m.department}{m.registrant ? " · " + m.registrant : ""}{m.meeting_date ? " · " + m.meeting_date : ""}</span>
                 </div>
-                {m.notion_url && <a className="list-open" href={m.notion_url} target="_blank" rel="noreferrer">열기 <ExternalLink size={13} /></a>}
-              </div>
+                <ChevronRight size={16} color="#94a3b8" />
+              </button>
             ))}
           </div>
         )}
