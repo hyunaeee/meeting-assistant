@@ -857,7 +857,7 @@ export default function App() {
               <div className="field">
                 <label className="toggle-row">
                   <input type="checkbox" checked={diarizeEnabled} onChange={(e) => setDiarizeEnabled(e.target.checked)} />
-                  <span><b>화자 구분</b> — 목소리별로 화자를 나눠 표시. <span className="toggle-hint">거의 안 느려짐 · 기본 켜짐</span></span>
+                  <span><b>화자 구분</b> — 목소리별로 화자를 나눠 표시. <span className="toggle-hint">느려짐 · 기본 켜짐</span></span>
                 </label>
               </div>
 
