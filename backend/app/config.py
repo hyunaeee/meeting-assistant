@@ -58,26 +58,8 @@ def _load_db_by_department() -> dict[str, str]:
 
 NOTION_DB_BY_DEPARTMENT = _load_db_by_department()
 
-
-def _load_json_map(name: str) -> dict:
-    raw = os.getenv(name, "").strip()
-    if not raw:
-        return {}
-    try:
-        data = json.loads(raw)
-        return data if isinstance(data, dict) else {}
-    except Exception:
-        return {}
-
-
-# 대표/전체용 DB. 모든 회의록이 (부서·프로젝트 DB와 별개로) 여기에도 저장된다.
+# 대표/전체용 DB. 모든 회의록이 (부서 DB와 별개로) 여기에도 저장된다.
 NOTION_ALL_DB = os.getenv("NOTION_ALL_DB", "").strip()
-
-# 부서별 프로젝트 선택지: {"부서": ["프로젝트A", "프로젝트B"]}. (드롭다운용, 아직 비어있음)
-NOTION_PROJECTS_BY_DEPARTMENT = _load_json_map("NOTION_PROJECTS_BY_DEPARTMENT")
-
-# 프로젝트별 DB 매핑: {"부서": {"프로젝트A": "db_id"}}. (라우팅용, 주소는 나중에 채움)
-NOTION_DB_BY_PROJECT = _load_json_map("NOTION_DB_BY_PROJECT")
 
 SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
 SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))

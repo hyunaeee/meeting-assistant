@@ -149,9 +149,7 @@ export default function App() {
   const [result, setResult] = useState(null);
   const [error, setError] = useState("");
   const [departments, setDepartments] = useState([]);
-  const [projectsByDept, setProjectsByDept] = useState({});
   const [selectedDepartment, setSelectedDepartment] = useState("");
-  const [selectedProject, setSelectedProject] = useState("");
   const [registrant, setRegistrant] = useState("");
   const [diarizeEnabled, setDiarizeEnabled] = useState(true);
   const [summaryLang, setSummaryLang] = useState("ko");
@@ -177,18 +175,13 @@ export default function App() {
   const [isSendingEmail, setIsSendingEmail] = useState(false);
   const [manualEmailStatus, setManualEmailStatus] = useState("");
 
-  // 부서 목록 + 부서별 프로젝트 목록을 불러온다.
+  // 부서 목록을 불러온다.
   useEffect(() => {
     fetch(API_BASE_URL + "/api/meetings/departments")
       .then((r) => r.json())
-      .then((d) => {
-        setDepartments(Array.isArray(d.departments) ? d.departments : []);
-        setProjectsByDept(d.projects_by_department && typeof d.projects_by_department === "object" ? d.projects_by_department : {});
-      })
-      .catch(() => { setDepartments([]); setProjectsByDept({}); });
+      .then((d) => setDepartments(Array.isArray(d.departments) ? d.departments : []))
+      .catch(() => setDepartments([]));
   }, []);
-
-  const projectOptions = Array.isArray(projectsByDept[selectedDepartment]) ? projectsByDept[selectedDepartment] : [];
 
   const status = useMemo(() => {
     if (isProcessing) return "회의록 생성 중";
@@ -618,7 +611,6 @@ export default function App() {
       form.append("duration_seconds", String(durationForRequest || 0));
       form.append("department", selectedDepartment);
       form.append("registrant", registrant.trim());
-      form.append("project", selectedProject);
       form.append("diarize", diarizeEnabled ? "true" : "false");
       form.append("summary_lang", summaryLang);
 
@@ -821,7 +813,7 @@ export default function App() {
                 <select
                   className="input"
                   value={selectedDepartment}
-                  onChange={(e) => { setSelectedDepartment(e.target.value); setSelectedProject(""); }}
+                  onChange={(e) => setSelectedDepartment(e.target.value)}
                 >
                   <option value="">부서를 선택하세요</option>
                   {departments.map((d) => (
@@ -829,22 +821,6 @@ export default function App() {
                   ))}
                 </select>
               </div>
-
-              {projectOptions.length > 0 && (
-                <div className="field">
-                  <FieldLabel title="프로젝트" optional />
-                  <select
-                    className="input"
-                    value={selectedProject}
-                    onChange={(e) => setSelectedProject(e.target.value)}
-                  >
-                    <option value="">선택 안 함 (부서로 저장)</option>
-                    {projectOptions.map((p) => (
-                      <option key={p} value={p}>{p}</option>
-                    ))}
-                  </select>
-                </div>
-              )}
 
               <div className="field">
                 <FieldLabel title="등록자" required />
