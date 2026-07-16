@@ -240,7 +240,7 @@ def auth_me(user: Optional[dict] = Depends(get_current_user)):
 
 @app.get("/api/meetings/list")
 def meetings_list(user: Optional[dict] = Depends(get_current_user)):
-    """권한에 맞는 회의록 목록. 대표=전체 / 본부장=본부 / 개인=본인 것."""
+    """앱 회의록 목록은 역할과 무관하게 '본인이 만든 것'만. 남의 것은 Notion에서 열람."""
     items = []
     for path in config.STORAGE_DIR.glob("*.json"):
         if path.name.endswith("_notes.json"):
@@ -249,7 +249,7 @@ def meetings_list(user: Optional[dict] = Depends(get_current_user)):
             data = json.loads(path.read_text(encoding="utf-8"))
         except Exception:  # noqa: BLE001
             continue
-        if config.AUTH_ENABLED and user and not auth_svc.can_view(user["email"], data):
+        if config.AUTH_ENABLED and user and not auth_svc.is_own(user["email"], data):
             continue
         items.append({
             "meeting_id": data.get("meeting_id"),
@@ -276,8 +276,8 @@ def meeting_detail(meeting_id: str, user: Optional[dict] = Depends(get_current_u
         data = json.loads(path.read_text(encoding="utf-8"))
     except Exception:  # noqa: BLE001
         return JSONResponse(status_code=500, content={"error": "회의록을 읽을 수 없습니다."})
-    if config.AUTH_ENABLED and user and not auth_svc.can_view(user["email"], data):
-        raise HTTPException(status_code=403, detail="이 회의록을 볼 권한이 없습니다.")
+    if config.AUTH_ENABLED and user and not auth_svc.is_own(user["email"], data):
+        raise HTTPException(status_code=403, detail="본인이 등록한 회의록만 앱에서 볼 수 있습니다. (다른 회의록은 Notion에서 확인)")
     return data
 
 

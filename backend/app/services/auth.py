@@ -46,6 +46,12 @@ def role_for(email: str) -> dict:
     return {"role": "user", "department": None}
 
 
+def is_own(user_email: str, record: dict) -> bool:
+    """이 회의록을 이 사람이 만들었는지(작성자 본인)."""
+    email = (user_email or "").strip().lower()
+    return bool(email) and (record.get("creator_email") or "").strip().lower() == email
+
+
 def can_view(user_email: str, record: dict) -> bool:
     """이 사용자가 해당 회의록 기록을 볼 수 있는지."""
     email = (user_email or "").strip().lower()

@@ -1219,7 +1219,7 @@ function MeetingsListModal({ onClose, currentUser }) {
       .finally(() => setDetailLoading(false));
   };
 
-  const scope = (currentUser?.role === "ceo" || currentUser?.role === "admin") ? "전체" : currentUser?.role === "head" ? `${currentUser.department} 본부` : "내가 등록한";
+  const scope = "내가 만든";
   const meetings = data?.meetings || [];
 
   // ── 상세 보기 ──
@@ -1287,7 +1287,7 @@ function MeetingsListModal({ onClose, currentUser }) {
         <div className="modal-head">
           <div>
             <h3 className="h2" style={{ fontSize: 22 }}>회의록 목록</h3>
-            <p className="help">{scope} 회의록{data ? ` · ${meetings.length}건` : ""} · 클릭하면 내용을 볼 수 있어요</p>
+            <p className="help">{scope} 회의록{data ? ` · ${meetings.length}건` : ""} · 클릭해서 내용 보기 · 다른 회의록은 Notion에서</p>
           </div>
           <button className="modal-close" type="button" onClick={onClose} aria-label="닫기"><X size={18} /></button>
         </div>
