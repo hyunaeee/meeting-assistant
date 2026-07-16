@@ -61,7 +61,8 @@ def get_current_user(authorization: Optional[str] = Header(None)) -> Optional[di
     token = authorization.split(" ", 1)[1].strip()
     try:
         user = auth_svc.verify_google_token(token)
-    except Exception:
+    except Exception as exc:  # noqa: BLE001
+        print(f"[auth] 토큰 검증 실패: {type(exc).__name__}: {exc}")
         raise HTTPException(status_code=401, detail="유효하지 않은 로그인입니다. 다시 로그인해주세요.")
     if not auth_svc.is_allowed(user["email"]):
         raise HTTPException(status_code=403, detail="접근이 허용되지 않은 계정입니다.")
