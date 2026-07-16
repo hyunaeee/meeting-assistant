@@ -281,40 +281,82 @@ def meeting_detail(meeting_id: str, user: Optional[dict] = Depends(get_current_u
     return data
 
 
+def _bump(d: dict, key: str, minutes: int) -> None:
+    """{key: {count, minutes}} 누적."""
+    e = d.setdefault(key, {"count": 0, "minutes": 0})
+    e["count"] += 1
+    e["minutes"] += minutes
+
+
+def _to_sorted_list(d: dict) -> list:
+    """{name:{count,minutes}} → [{name,count,minutes}] 건수 내림차순."""
+    return sorted(
+        [{"name": k, **v} for k, v in d.items()],
+        key=lambda x: (x["count"], x["minutes"]),
+        reverse=True,
+    )
+
+
 @app.get("/api/stats/monthly")
-def monthly_stats():
-    """저장된 회의록 기록을 월 단위로 집계한다."""
-    buckets: dict[str, dict] = {}
+def monthly_stats(user: Optional[dict] = Depends(get_current_user)):
+    """회의록 이용 통계(월별 + 등록자별 + 부서별). 권한에 맞는 기록만 집계."""
+    months: dict[str, dict] = {}
+    all_dept: dict[str, dict] = {}
+    all_reg: dict[str, dict] = {}
+    total_count = 0
+    total_minutes = 0
+
     for path in config.STORAGE_DIR.glob("*.json"):
         if path.name.endswith("_notes.json"):
-            continue  # 회의록 본문 파일은 제외 (전체 결과 파일만 집계)
+            continue
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
         except Exception:  # noqa: BLE001
+            continue
+        if config.AUTH_ENABLED and user and not auth_svc.can_view(user["email"], data):
             continue
 
         meeting_id = str(data.get("meeting_id") or path.stem)
         upload_date = str(data.get("upload_date") or "")
         if len(upload_date) >= 7:
-            month = upload_date[:7]  # YYYY-MM
+            month = upload_date[:7]
         elif len(meeting_id) >= 6 and meeting_id[:6].isdigit():
             month = f"{meeting_id[:4]}-{meeting_id[4:6]}"
         else:
             month = "기타"
 
-        bucket = buckets.setdefault(
-            month,
-            {"month": month, "count": 0, "total_minutes": 0, "by_department": {}, "by_registrant": {}},
-        )
-        bucket["count"] += 1
-        bucket["total_minutes"] += int(round((data.get("duration_seconds") or 0) / 60))
+        minutes = int(round((data.get("duration_seconds") or 0) / 60))
         dept = data.get("department") or "미지정"
         reg = data.get("registrant") or "미지정"
-        bucket["by_department"][dept] = bucket["by_department"].get(dept, 0) + 1
-        bucket["by_registrant"][reg] = bucket["by_registrant"].get(reg, 0) + 1
 
-    months = sorted(buckets.values(), key=lambda b: b["month"], reverse=True)
-    return {"months": months, "total_count": sum(m["count"] for m in months)}
+        total_count += 1
+        total_minutes += minutes
+        _bump(all_dept, dept, minutes)
+        _bump(all_reg, reg, minutes)
+
+        b = months.setdefault(month, {"month": month, "count": 0, "minutes": 0, "by_department": {}, "by_registrant": {}})
+        b["count"] += 1
+        b["minutes"] += minutes
+        _bump(b["by_department"], dept, minutes)
+        _bump(b["by_registrant"], reg, minutes)
+
+    month_list = []
+    for m in sorted(months.values(), key=lambda x: x["month"], reverse=True):
+        month_list.append({
+            "month": m["month"],
+            "count": m["count"],
+            "minutes": m["minutes"],
+            "by_department": _to_sorted_list(m["by_department"]),
+            "by_registrant": _to_sorted_list(m["by_registrant"]),
+        })
+
+    return {
+        "total_count": total_count,
+        "total_minutes": total_minutes,
+        "by_department": _to_sorted_list(all_dept),
+        "by_registrant": _to_sorted_list(all_reg),
+        "months": month_list,
+    }
 
 
 @app.post("/api/meetings/process")

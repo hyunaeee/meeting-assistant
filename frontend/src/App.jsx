@@ -1313,49 +1313,75 @@ function MeetingsListModal({ onClose, currentUser }) {
   );
 }
 
+function StatBars({ rows }) {
+  const max = Math.max(1, ...rows.map((r) => r.count));
+  return (
+    <div className="stat-bars">
+      {rows.map((r) => (
+        <div key={r.name} className="stat-bar-row">
+          <span className="stat-bar-name" title={r.name}>{r.name}</span>
+          <div className="stat-bar-track"><div className="stat-bar-fill" style={{ width: `${Math.round((r.count / max) * 100)}%` }} /></div>
+          <span className="stat-bar-val">{r.count}건 · {r.minutes}분</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function StatsModal({ onClose }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [tab, setTab] = useState("registrant");
 
   useEffect(() => {
     fetch(API_BASE_URL + "/api/stats/monthly", { headers: authHeaders() })
       .then((r) => r.json())
       .then((d) => { setData(d); setLoading(false); })
-      .catch(() => { setData({ months: [], total_count: 0 }); setLoading(false); });
+      .catch(() => { setData({ months: [], total_count: 0, by_registrant: [], by_department: [] }); setLoading(false); });
   }, []);
 
   const months = data?.months || [];
+  const empty = !loading && (data?.total_count || 0) === 0;
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+      <div className="modal-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 560 }}>
         <div className="modal-head">
           <div>
             <h3 className="h2" style={{ fontSize: 22 }}>이용 통계</h3>
-            <p className="help">월 단위 회의록 생성 기록{data ? ` · 전체 ${data.total_count}건` : ""}</p>
+            {data && <p className="help">전체 <b>{data.total_count}건</b> · 총 <b>{data.total_minutes}분</b></p>}
           </div>
           <button className="modal-close" type="button" onClick={onClose} aria-label="닫기"><X size={18} /></button>
         </div>
         {loading ? (
           <p className="help" style={{ padding: "12px 0" }}><Loader2 size={15} className="process-spin" /> 불러오는 중…</p>
-        ) : months.length === 0 ? (
+        ) : empty ? (
           <p className="help" style={{ padding: "12px 0" }}>아직 기록이 없습니다.</p>
         ) : (
-          <div className="stats-scroll">
-            {months.map((m) => (
-              <div key={m.month} className="stats-month">
-                <div className="stats-month-head">
-                  <b>{m.month}</b>
-                  <span>{m.count}건 · {m.total_minutes}분</span>
+          <>
+            <div className="stat-tabs">
+              {[["registrant", "등록자별"], ["department", "부서별"], ["month", "월별"]].map(([k, label]) => (
+                <button key={k} type="button" className={"stat-tab " + (tab === k ? "active" : "")} onClick={() => setTab(k)}>{label}</button>
+              ))}
+            </div>
+            <div className="stats-scroll">
+              {tab === "registrant" && <StatBars rows={data.by_registrant || []} />}
+              {tab === "department" && <StatBars rows={data.by_department || []} />}
+              {tab === "month" && months.map((m) => (
+                <div key={m.month} className="stats-month">
+                  <div className="stats-month-head">
+                    <b>{m.month}</b>
+                    <span>{m.count}건 · {m.minutes}분</span>
+                  </div>
+                  <div className="stats-tags">
+                    {(m.by_registrant || []).map((r) => (
+                      <span key={r.name} className="tag">{r.name} <b>{r.count}</b></span>
+                    ))}
+                  </div>
                 </div>
-                <div className="stats-tags">
-                  {Object.entries(m.by_department).map(([k, v]) => (
-                    <span key={k} className="tag">{k} <b>{v}</b></span>
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          </>
         )}
       </div>
     </div>
