@@ -25,7 +25,7 @@ def is_allowed(email: str) -> bool:
     email = (email or "").strip().lower()
     if not email:
         return False
-    if email in config.EXTRA_ALLOWED_EMAILS or email in config.CEO_EMAILS:
+    if email in config.EXTRA_ALLOWED_EMAILS or email in config.CEO_EMAILS or email in config.ADMIN_EMAILS:
         return True
     if email in config.DEPARTMENT_HEADS:
         return True
@@ -35,8 +35,10 @@ def is_allowed(email: str) -> bool:
 
 
 def role_for(email: str) -> dict:
-    """역할 판정. {'role': 'ceo'|'head'|'user', 'department': str|None}"""
+    """역할 판정. {'role': 'admin'|'ceo'|'head'|'user', 'department': str|None}"""
     email = (email or "").strip().lower()
+    if email in config.ADMIN_EMAILS:
+        return {"role": "admin", "department": None}
     if email in config.CEO_EMAILS:
         return {"role": "ceo", "department": None}
     if email in config.DEPARTMENT_HEADS:
@@ -48,7 +50,7 @@ def can_view(user_email: str, record: dict) -> bool:
     """이 사용자가 해당 회의록 기록을 볼 수 있는지."""
     email = (user_email or "").strip().lower()
     role = role_for(email)
-    if role["role"] == "ceo":
+    if role["role"] in ("admin", "ceo"):
         return True
     if role["role"] == "head":
         return (record.get("department") or "") == role["department"]

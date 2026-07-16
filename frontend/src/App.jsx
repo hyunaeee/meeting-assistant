@@ -867,7 +867,7 @@ export default function App() {
             <button className="stats-btn" type="button" onClick={() => setStatsOpen(true)}><BarChart3 size={16} /> 이용 통계</button>
             {currentUser && (
               <span className="user-chip" title={currentUser.email}>
-                {currentUser.name}{currentUser.role === "ceo" ? " · 대표" : currentUser.role === "head" ? ` · ${currentUser.department} 본부장` : ""}
+                {currentUser.name}{currentUser.role === "admin" ? " · 관리자" : currentUser.role === "ceo" ? " · 대표" : currentUser.role === "head" ? ` · ${currentUser.department} 본부장` : ""}
                 <button className="logout-btn" type="button" onClick={logout}>로그아웃</button>
               </span>
             )}
@@ -1219,7 +1219,7 @@ function MeetingsListModal({ onClose, currentUser }) {
       .finally(() => setDetailLoading(false));
   };
 
-  const scope = currentUser?.role === "ceo" ? "전체" : currentUser?.role === "head" ? `${currentUser.department} 본부` : "내가 등록한";
+  const scope = (currentUser?.role === "ceo" || currentUser?.role === "admin") ? "전체" : currentUser?.role === "head" ? `${currentUser.department} 본부` : "내가 등록한";
   const meetings = data?.meetings || [];
 
   // ── 상세 보기 ──

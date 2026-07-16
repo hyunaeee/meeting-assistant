@@ -79,6 +79,8 @@ ALLOWED_EMAIL_DOMAIN = os.getenv("ALLOWED_EMAIL_DOMAIN", "").strip().lower()
 EXTRA_ALLOWED_EMAILS = [e.strip().lower() for e in os.getenv("EXTRA_ALLOWED_EMAILS", "").split(",") if e.strip()]
 # 대표(전체 열람) 이메일. 콤마 구분.
 CEO_EMAILS = [e.strip().lower() for e in os.getenv("CEO_EMAILS", "").split(",") if e.strip()]
+# 관리자(전체 열람, 라벨만 '관리자'). 콤마 구분.
+ADMIN_EMAILS = [e.strip().lower() for e in os.getenv("ADMIN_EMAILS", "").split(",") if e.strip()]
 
 
 def _load_department_heads() -> dict[str, str]:
