@@ -11,6 +11,8 @@ def verify_google_token(id_token_str: str) -> dict:
         id_token_str,
         google_requests.Request(),
         config.GOOGLE_CLIENT_ID or None,
+        # 서버/도커 시계가 구글과 몇 초 어긋나도 통과되도록 허용 오차를 둔다
+        clock_skew_in_seconds=10,
     )
     email = (info.get("email") or "").strip().lower()
     if not email:
