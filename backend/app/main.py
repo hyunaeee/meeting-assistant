@@ -1,13 +1,15 @@
+import base64
 import json
 import shutil
 import threading
+import time
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -49,6 +51,65 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def access_log(request: Request, call_next):
+    """모든 API 요청을 로그로 남긴다. (status 폴링/로그 조회는 정상일 때 생략)"""
+    start = time.time()
+    try:
+        response = await call_next(request)
+    except Exception as exc:  # noqa: BLE001
+        _log_event(
+            "error",
+            ip=(request.client.host if request.client else ""),
+            method=request.method,
+            path=request.url.path,
+            error=f"{type(exc).__name__}: {exc}",
+            user=_peek_email(request.headers.get("authorization") or ""),
+        )
+        raise
+    path = request.url.path
+    if path.startswith("/api") and request.method != "OPTIONS":
+        noisy = path.startswith("/api/meetings/status/") or path.startswith("/api/logs")
+        if (not noisy) or response.status_code >= 400:
+            _log_event(
+                "error" if response.status_code >= 400 else "access",
+                ip=(request.client.host if request.client else ""),
+                method=request.method,
+                path=path,
+                status=response.status_code,
+                ms=int((time.time() - start) * 1000),
+                user=_peek_email(request.headers.get("authorization") or ""),
+            )
+    return response
+
+
+# ── 이용/에러 로그 (storage/logs/YYYYMMDD.jsonl, 호스트 볼륨에 보존) ────────
+LOGS_DIR = config.STORAGE_DIR / "logs"
+
+
+def _log_event(kind: str, **fields) -> None:
+    """이용/에러 기록을 날짜별 JSONL 파일에 남긴다. 실패해도 앱 동작엔 영향 없음."""
+    try:
+        LOGS_DIR.mkdir(exist_ok=True)
+        rec = {"ts": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "kind": kind, **fields}
+        path = LOGS_DIR / (datetime.now().strftime("%Y%m%d") + ".jsonl")
+        with path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _peek_email(auth_header: str) -> str:
+    """로그용으로만 토큰에서 이메일을 꺼낸다(검증은 하지 않음 — 권한 판정에 쓰지 말 것)."""
+    try:
+        payload = auth_header.split(" ", 1)[1].split(".")[1]
+        payload += "=" * (-len(payload) % 4)
+        data = json.loads(base64.urlsafe_b64decode(payload))
+        return (data.get("email") or "").lower()
+    except Exception:  # noqa: BLE001
+        return ""
 
 
 def get_current_user(authorization: Optional[str] = Header(None)) -> Optional[dict]:
@@ -187,9 +248,12 @@ def _run_meeting_job(
             "requested_emails": email_list,
         }
         _save_result(meeting_id, result)
+        if notion_error:
+            _log_event("job-error", meeting_id=meeting_id, user=creator_email, registrant=registrant, error=f"Notion 저장 실패: {notion_error}")
         with _jobs_lock:
             _jobs[job_id] = {"status": "done", "result": result}
     except Exception as exc:  # noqa: BLE001
+        _log_event("job-error", meeting_id=meeting_id, user=creator_email, registrant=registrant, error=f"{type(exc).__name__}: {exc}")
         with _jobs_lock:
             _jobs[job_id] = {"status": "error", "error": str(exc)}
 
@@ -223,6 +287,47 @@ def health():
 def departments():
     """프론트 드롭다운용 부서 목록."""
     return {"departments": config.DEPARTMENTS}
+
+
+class ClientLogPayload(BaseModel):
+    level: str = "error"
+    message: str
+    context: Optional[str] = ""
+
+
+@app.post("/api/log/client")
+def client_log(payload: ClientLogPayload, request: Request, authorization: Optional[str] = Header(None)):
+    """프론트엔드(브라우저) 에러 수집. 로그인 전 실패도 받아야 하므로 인증 불요."""
+    _log_event(
+        "client-" + (payload.level or "error"),
+        message=str(payload.message)[:2000],
+        context=str(payload.context or "")[:500],
+        user=_peek_email(authorization or ""),
+        ip=(request.client.host if request.client else ""),
+    )
+    return {"ok": True}
+
+
+@app.get("/api/logs/recent")
+def logs_recent(limit: int = 300, errors_only: bool = False, user: Optional[dict] = Depends(get_current_user)):
+    """최근 이용/에러 로그(최근 7일). 관리자만."""
+    if config.AUTH_ENABLED and (not user or user.get("role") != "admin"):
+        raise HTTPException(status_code=403, detail="관리자만 볼 수 있습니다.")
+    rows: list[dict] = []
+    if LOGS_DIR.exists():
+        for f in sorted(LOGS_DIR.glob("*.jsonl"), reverse=True)[:7]:
+            try:
+                for line in f.read_text(encoding="utf-8").splitlines():
+                    try:
+                        rows.append(json.loads(line))
+                    except Exception:  # noqa: BLE001
+                        pass
+            except Exception:  # noqa: BLE001
+                continue
+    if errors_only:
+        rows = [r for r in rows if r.get("kind") != "access"]
+    rows.sort(key=lambda r: r.get("ts", ""), reverse=True)
+    return {"logs": rows[: max(1, min(limit, 1000))]}
 
 
 @app.get("/api/auth/config")

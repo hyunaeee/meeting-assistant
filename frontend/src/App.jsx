@@ -44,6 +44,17 @@ function setAuthToken(t) {
     else localStorage.removeItem("id_token");
   }
 }
+
+// 브라우저에서 발생한 에러를 서버 로그로 보냄 (관리자가 수집·열람)
+function reportClientError(message, context) {
+  try {
+    fetch(API_BASE_URL + "/api/log/client", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify({ level: "error", message: String(message).slice(0, 2000), context: String(context || "").slice(0, 500) }),
+    }).catch(() => {});
+  } catch { /* 로깅 실패는 무시 */ }
+}
 const DEFAULT_NOTION_LOCATION = "LIKE Notion AI 회의록";
 const DEFAULT_NOTION_DESCRIPTION = "기본 회의록 페이지";
 const NEW_LINE = String.fromCharCode(10);
@@ -177,7 +188,20 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState(null);
   const [authChecked, setAuthChecked] = useState(false);
   const [listOpen, setListOpen] = useState(false);
+  const [logsOpen, setLogsOpen] = useState(false);
   const [gisReady, setGisReady] = useState(false);
+
+  // 전역 브라우저 에러를 서버 로그로 수집
+  useEffect(() => {
+    const onError = (e) => reportClientError(e.message || "window error", (e.filename || "") + ":" + (e.lineno || ""));
+    const onRejection = (e) => reportClientError("unhandledrejection: " + (e.reason?.message || String(e.reason)), "");
+    window.addEventListener("error", onError);
+    window.addEventListener("unhandledrejection", onRejection);
+    return () => {
+      window.removeEventListener("error", onError);
+      window.removeEventListener("unhandledrejection", onRejection);
+    };
+  }, []);
 
   // 로그인 설정 로드 + (필요 시) 구글 로그인 초기화
   useEffect(() => {
@@ -210,7 +234,7 @@ export default function App() {
           fetch(API_BASE_URL + "/api/auth/me", { headers: authHeaders() })
             .then((r) => (r.ok ? r.json() : Promise.reject()))
             .then((me) => { if (me.email) { setCurrentUser(me); setError(""); } })
-            .catch(() => { setAuthToken(null); setError("허용되지 않은 계정이거나 로그인에 실패했습니다."); });
+            .catch(() => { setAuthToken(null); setError("허용되지 않은 계정이거나 로그인에 실패했습니다."); reportClientError("로그인 실패 (auth/me 거부)", "login"); });
         },
       });
       setGisReady(true);
@@ -753,6 +777,7 @@ export default function App() {
       } else {
         setError(err.message || "회의록 생성 중 오류가 발생했습니다.");
       }
+      reportClientError("회의록 생성 실패: " + (err.message || err.name || "unknown"), "processMeeting");
       setProcessingLogs((prev) => [...prev.map((log) => log.status === "active" ? { ...log, status: "done" } : log), { label: "회의록 생성 중 오류 발생", status: "error" }]);
     } finally {
       window.clearInterval(progressTimer);
@@ -884,6 +909,7 @@ export default function App() {
           <div className="header-right">
             {currentUser && <button className="stats-btn" type="button" onClick={() => setListOpen(true)}><FileText size={16} /> 회의록 목록</button>}
             <button className="stats-btn" type="button" onClick={() => setStatsOpen(true)}><BarChart3 size={16} /> 이용 통계</button>
+            {currentUser?.role === "admin" && <button className="stats-btn" type="button" onClick={() => setLogsOpen(true)}><AudioLines size={16} /> 로그</button>}
             {currentUser && (
               <span className="user-chip" title={currentUser.email}>
                 {currentUser.name}{currentUser.role === "admin" ? " · 관리자" : currentUser.role === "ceo" ? " · 대표" : currentUser.role === "head" ? ` · ${currentUser.department} 본부장` : ""}
@@ -902,6 +928,7 @@ export default function App() {
       </header>
       {statsOpen && <StatsModal onClose={() => setStatsOpen(false)} />}
       {listOpen && <MeetingsListModal onClose={() => setListOpen(false)} currentUser={currentUser} />}
+      {logsOpen && <LogsModal onClose={() => setLogsOpen(false)} />}
 
       <section className={"container" + (step === "result" ? " container-result" : "")}>
         {step !== "result" && (
@@ -1213,6 +1240,65 @@ function ProcessingLog({ logs }) {
       </div>
     ))}
   </div>;
+}
+
+function LogsModal({ onClose }) {
+  const [logs, setLogs] = useState(null);
+  const [errorsOnly, setErrorsOnly] = useState(true);
+  const [loading, setLoading] = useState(true);
+
+  const load = (eo) => {
+    setLoading(true);
+    fetch(API_BASE_URL + "/api/logs/recent?limit=300&errors_only=" + (eo ? "true" : "false"), { headers: authHeaders() })
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
+      .then((d) => { setLogs(d.logs || []); setLoading(false); })
+      .catch(() => { setLogs([]); setLoading(false); });
+  };
+  useEffect(() => { load(errorsOnly); }, [errorsOnly]);
+
+  const kindLabel = (k) => k === "access" ? "이용" : k === "error" ? "API에러" : k === "job-error" ? "처리에러" : k?.startsWith("client") ? "브라우저" : k;
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 680 }}>
+        <div className="modal-head">
+          <div>
+            <h3 className="h2" style={{ fontSize: 22 }}>이용/에러 로그</h3>
+            <p className="help">최근 7일 · {errorsOnly ? "에러만" : "전체"}{logs ? ` · ${logs.length}건` : ""}</p>
+          </div>
+          <button className="modal-close" type="button" onClick={onClose} aria-label="닫기"><X size={18} /></button>
+        </div>
+        <div className="stat-tabs">
+          <button type="button" className={"stat-tab " + (errorsOnly ? "active" : "")} onClick={() => setErrorsOnly(true)}>에러만</button>
+          <button type="button" className={"stat-tab " + (!errorsOnly ? "active" : "")} onClick={() => setErrorsOnly(false)}>전체 이용</button>
+          <button type="button" className="stat-tab" onClick={() => load(errorsOnly)}>새로고침</button>
+        </div>
+        {loading ? (
+          <p className="help" style={{ padding: "12px 0" }}><Loader2 size={15} className="process-spin" /> 불러오는 중…</p>
+        ) : !logs?.length ? (
+          <p className="help" style={{ padding: "12px 0" }}>기록이 없습니다.</p>
+        ) : (
+          <div className="stats-scroll" style={{ maxHeight: "62vh" }}>
+            {logs.map((l, i) => (
+              <div key={i} className={"log-row " + (l.kind !== "access" ? "log-err" : "")}>
+                <div className="log-row-top">
+                  <span className="log-kind">{kindLabel(l.kind)}</span>
+                  <span className="log-ts">{l.ts}</span>
+                  {l.user && <span className="log-user">{l.user}</span>}
+                </div>
+                <div className="log-body">
+                  {l.path ? `${l.method || ""} ${l.path}${l.status ? " → " + l.status : ""}${l.ms != null ? " (" + l.ms + "ms)" : ""}` : ""}
+                  {l.message ? l.message : ""}
+                  {l.error ? " " + l.error : ""}
+                  {l.context ? ` [${l.context}]` : ""}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }
 
 function MeetingsListModal({ onClose, currentUser }) {

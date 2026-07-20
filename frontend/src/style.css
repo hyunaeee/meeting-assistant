@@ -118,6 +118,16 @@ button, input, textarea, select { font: inherit; }
 .stats-month-head span { color: var(--accent-strong); font-weight: 700; font-size: 14px; }
 .stats-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
 
+/* 이용/에러 로그 */
+.log-row { border: 1px solid var(--border-soft); background: var(--surface-2); border-radius: var(--r-sm); padding: 10px 12px; }
+.log-row.log-err { border-color: oklch(88% 0.08 25); background: oklch(97% 0.02 25); }
+.log-row-top { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.log-kind { font-size: 11px; font-weight: 800; padding: 2px 8px; border-radius: var(--r-pill); background: var(--surface); color: var(--muted); }
+.log-err .log-kind { background: var(--danger); color: #fff; }
+.log-ts { font-size: 12px; color: var(--muted); }
+.log-user { font-size: 12px; color: var(--accent-strong); font-weight: 700; }
+.log-body { font-size: 12px; color: var(--foreground); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; word-break: break-all; line-height: 1.5; }
+
 /* 통계 탭 */
 .stat-tabs { display: flex; gap: 6px; margin-bottom: 14px; background: var(--surface-2); padding: 4px; border-radius: var(--r-pill); }
 .stat-tab { flex: 1; border: 0; background: transparent; color: var(--muted); font-size: 13px; font-weight: 700; padding: 8px 10px; border-radius: var(--r-pill); cursor: pointer; }
