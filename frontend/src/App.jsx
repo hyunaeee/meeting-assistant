@@ -826,6 +826,25 @@ export default function App() {
     setError("");
   };
 
+  // 인증 설정/세션 확인이 끝나기 전에는 메인 화면을 그리지 않는다
+  // (메인 화면이 먼저 번쩍 보였다가 로그인 화면으로 바뀌는 것 방지)
+  if (!authCfg || !authChecked) {
+    return (
+      <main className="bg">
+        <div className="blur-a" />
+        <div className="blur-b" />
+        <div className="blur-c" />
+        <div className="login-gate">
+          <div className="login-card">
+            <div className="logo-icon" style={{ width: 56, height: 56, margin: "0 auto 18px" }}><Mic size={26} /></div>
+            <h1 className="h2" style={{ fontSize: 24 }}>LIKE meeting assistant</h1>
+            <p className="help" style={{ marginTop: 10 }}><Loader2 size={14} className="process-spin" /> 불러오는 중…</p>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
   // 로그인 필수인데 아직 로그인 안 했으면 로그인 화면
   if (authCfg?.auth_enabled && authChecked && !currentUser) {
     return (
