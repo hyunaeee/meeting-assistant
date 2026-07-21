@@ -22,9 +22,10 @@ def preload_model() -> None:
     _get_model()
 
 
-def transcribe_segments(audio_path: Path):
+def transcribe_segments(audio_path: Path, language: str | None = None):
     """전사 세그먼트 목록과 변환된 wav 경로를 반환한다.
     segments = [{"start": float, "end": float, "text": str}] (시간순)
+    language: "ko"/"en" 강제, None 이면 .env 설정, 그것도 비면 자동 감지.
     """
     if not audio_path.exists():
         raise FileNotFoundError(str(audio_path))
@@ -34,7 +35,7 @@ def transcribe_segments(audio_path: Path):
 
     wav_path = _convert_to_wav(audio_path)
     model = _get_model()
-    language = config.WHISPER_LANGUAGE or None
+    language = language or config.WHISPER_LANGUAGE or None
     segments, _info = model.transcribe(
         str(wav_path),
         language=language,

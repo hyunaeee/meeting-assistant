@@ -181,6 +181,7 @@ export default function App() {
   });
   const [diarizeEnabled, setDiarizeEnabled] = useState(true);
   const [summaryLang, setSummaryLang] = useState("ko");
+  const [transcribeLang, setTranscribeLang] = useState("ko");
   const [elapsedSec, setElapsedSec] = useState(0);
   const [etaSec, setEtaSec] = useState(0);
   const [statsOpen, setStatsOpen] = useState(false);
@@ -722,6 +723,7 @@ export default function App() {
       form.append("meeting_date", meetingDate || "");
       form.append("diarize", diarizeEnabled ? "true" : "false");
       form.append("summary_lang", summaryLang);
+      form.append("transcribe_lang", transcribeLang);
 
       // 1) 업로드 → 즉시 job_id 수신 (요청이 짧아 프록시 60초 타임아웃 회피)
       const startResp = await fetch(API_BASE_URL + "/api/meetings/process", {
@@ -1002,6 +1004,16 @@ export default function App() {
                   onChange={(e) => setMeetingDate(e.target.value)}
                 />
                 <p className="help">실제 회의가 열린 날짜입니다. (등록일과 별도로 기록)</p>
+              </div>
+
+              <div className="field">
+                <FieldLabel title="전사 언어" />
+                <select className="input" value={transcribeLang} onChange={(e) => setTranscribeLang(e.target.value)}>
+                  <option value="ko">한국어 (기본)</option>
+                  <option value="en">English</option>
+                  <option value="">자동 감지 (한·영 혼용)</option>
+                </select>
+                <p className="help">회의에서 말한 언어입니다. 한국어 회의는 그대로 두세요.</p>
               </div>
 
               <div className="field">

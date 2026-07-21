@@ -155,6 +155,7 @@ def _run_meeting_job(
     meeting_date: str = "",
     diarize: bool = True,
     summary_lang: str = "ko",
+    transcribe_lang: str = "ko",
     creator_email: str = "",
     creator_name: str = "",
 ) -> None:
@@ -162,7 +163,7 @@ def _run_meeting_job(
         segments: list[dict] = []
         with _transcribe_lock:
             try:
-                segments, wav_path = transcribe_segments(audio_path)
+                segments, wav_path = transcribe_segments(audio_path, language=(transcribe_lang or None))
                 # 화자 분리(옵션, 실패해도 화자 없이 진행)
                 if diarize:
                     try:
@@ -477,6 +478,7 @@ async def process_meeting(
     meeting_date: str = Form(""),
     diarize: bool = Form(True),
     summary_lang: str = Form("ko"),
+    transcribe_lang: str = Form("ko"),
     user: Optional[dict] = Depends(get_current_user),
 ):
     # 부서와 등록자는 필수.
@@ -524,6 +526,7 @@ async def process_meeting(
             "meeting_date": meeting_date,
             "diarize": diarize,
             "summary_lang": summary_lang,
+            "transcribe_lang": transcribe_lang.strip(),
             "creator_email": creator_email,
             "creator_name": creator_name,
         },
