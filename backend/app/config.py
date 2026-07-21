@@ -20,8 +20,9 @@ WHISPER_DEVICE = os.getenv("WHISPER_DEVICE", "cuda")
 WHISPER_COMPUTE_TYPE = os.getenv("WHISPER_COMPUTE_TYPE", "float16")
 # 비우면 자동 감지(영어 회의는 영어로, 한국어 회의는 한국어로 전사)
 WHISPER_LANGUAGE = os.getenv("WHISPER_LANGUAGE", "")
-# 전사 속도/정확도 트레이드오프. 1이면 빠름(그리디), 5면 느리고 약간 정확.
-WHISPER_BEAM_SIZE = int(os.getenv("WHISPER_BEAM_SIZE", "1"))
+# 전사 정확도/속도 트레이드오프. 5=정확(권장), 3=균형, 1=빠름(그리디).
+# .env 에 값이 없어도 품질이 조용히 떨어지지 않도록 기본을 5로 둔다.
+WHISPER_BEAM_SIZE = int(os.getenv("WHISPER_BEAM_SIZE", "5"))
 
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-sonnet-4-6")
