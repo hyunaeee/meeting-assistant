@@ -1,4 +1,5 @@
 """전역 설정"""
+import json
 import os
 from pathlib import Path
 from dotenv import load_dotenv
@@ -17,7 +18,11 @@ CHANNELS = 1
 WHISPER_MODEL = os.getenv("WHISPER_MODEL", "large-v3")
 WHISPER_DEVICE = os.getenv("WHISPER_DEVICE", "cuda")
 WHISPER_COMPUTE_TYPE = os.getenv("WHISPER_COMPUTE_TYPE", "float16")
-WHISPER_LANGUAGE = os.getenv("WHISPER_LANGUAGE", "ko")
+# 비우면 자동 감지(영어 회의는 영어로, 한국어 회의는 한국어로 전사)
+WHISPER_LANGUAGE = os.getenv("WHISPER_LANGUAGE", "")
+# 전사 정확도/속도 트레이드오프. 5=정확(권장), 3=균형, 1=빠름(그리디).
+# .env 에 값이 없어도 품질이 조용히 떨어지지 않도록 기본을 5로 둔다.
+WHISPER_BEAM_SIZE = int(os.getenv("WHISPER_BEAM_SIZE", "5"))
 
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-sonnet-4-6")
@@ -29,6 +34,34 @@ NOTION_DATABASE_ID = os.getenv("NOTION_DATABASE_ID", "")
 NOTION_DEFAULT_LOCATION = os.getenv("NOTION_DEFAULT_LOCATION", "LIKE Meeting Minutes")
 NOTION_VERSION = os.getenv("NOTION_VERSION", "2025-09-03")
 
+# 부서 선택지 (드롭다운). 필요하면 .env NOTION_DEPARTMENTS 로 콤마 구분 재정의 가능.
+DEPARTMENTS = [
+    d.strip()
+    for d in os.getenv("NOTION_DEPARTMENTS", "교육부,개발부").split(",")
+    if d.strip()
+]
+
+
+def _load_db_by_department() -> dict[str, str]:
+    """부서(본부)별 Notion DB 매핑. 부서마다 DB를 나눠 접근권한을 분리한다.
+    .env 예) NOTION_DB_BY_DEPARTMENT={"교육부":"db_id_1","개발부":"db_id_2"}
+    매핑에 없는 부서는 기본 NOTION_DATABASE_ID 로 저장된다.
+    """
+    raw = os.getenv("NOTION_DB_BY_DEPARTMENT", "").strip()
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+        return {str(k): str(v).strip() for k, v in data.items() if str(v).strip()}
+    except Exception:
+        return {}
+
+
+NOTION_DB_BY_DEPARTMENT = _load_db_by_department()
+
+# 대표/전체용 DB. 모든 회의록이 (부서 DB와 별개로) 여기에도 저장된다.
+NOTION_ALL_DB = os.getenv("NOTION_ALL_DB", "").strip()
+
 SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
 SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
 SMTP_USER = os.getenv("SMTP_USER", "")
@@ -36,3 +69,37 @@ SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
 SMTP_FROM = os.getenv("SMTP_FROM") or SMTP_USER
 
 HF_TOKEN = os.getenv("HF_TOKEN", "")
+
+# ── 구글 로그인 / 권한 ─────────────────────────────────────────────
+# AUTH_ENABLED=true 일 때만 로그인 필수 + 권한 필터 동작. 미설정이면 지금처럼 무로그인.
+AUTH_ENABLED = os.getenv("AUTH_ENABLED", "false").strip().lower() in ("1", "true", "yes")
+GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "").strip()
+# 로그인 허용 이메일 도메인(예: likecorp.co.kr). 비우면 도메인 제한 없음.
+ALLOWED_EMAIL_DOMAIN = os.getenv("ALLOWED_EMAIL_DOMAIN", "").strip().lower()
+# 도메인 밖이어도 허용할 개별 이메일(예: 관리자 gmail). 콤마 구분.
+EXTRA_ALLOWED_EMAILS = [e.strip().lower() for e in os.getenv("EXTRA_ALLOWED_EMAILS", "").split(",") if e.strip()]
+# 대표(전체 열람) 이메일. 콤마 구분.
+CEO_EMAILS = [e.strip().lower() for e in os.getenv("CEO_EMAILS", "").split(",") if e.strip()]
+# 관리자(전체 열람, 라벨만 '관리자'). 콤마 구분.
+ADMIN_EMAILS = [e.strip().lower() for e in os.getenv("ADMIN_EMAILS", "").split(",") if e.strip()]
+
+
+def _load_department_heads() -> dict[str, str]:
+    """본부장 매핑 {이메일: 부서}. 그 이메일은 해당 부서 전체를 열람한다.
+    .env 예) DEPARTMENT_HEADS={"kim@likecorp.co.kr":"개발사업본부"}
+    """
+    raw = os.getenv("DEPARTMENT_HEADS", "").strip()
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+        return {str(k).strip().lower(): str(v).strip() for k, v in data.items()}
+    except Exception:
+        return {}
+
+
+DEPARTMENT_HEADS = _load_department_heads()
+
+# 화자분리: 긴 오디오는 클러스터링이 O(n²)로 폭발하므로 청크로 나눠 처리 후 화자 병합.
+DIARIZE_CHUNK_SEC = int(os.getenv("DIARIZE_CHUNK_SEC", "300"))          # 청크 길이(초)
+DIARIZE_MERGE_THRESHOLD = float(os.getenv("DIARIZE_MERGE_THRESHOLD", "0.5"))  # 화자 병합 코사인 유사도 기준

@@ -17,7 +17,16 @@ def _get_model():
     return _model
 
 
-def transcribe_audio(audio_path: Path) -> str:
+def preload_model() -> None:
+    """앱 시작 시 모델을 미리 로드해 첫 요청의 콜드스타트 지연(→ 프록시 504)을 방지한다."""
+    _get_model()
+
+
+def transcribe_segments(audio_path: Path, language: str | None = None):
+    """전사 세그먼트 목록과 변환된 wav 경로를 반환한다.
+    segments = [{"start": float, "end": float, "text": str}] (시간순)
+    language: "ko"/"en" 강제, None 이면 .env 설정, 그것도 비면 자동 감지.
+    """
     if not audio_path.exists():
         raise FileNotFoundError(str(audio_path))
 
@@ -26,26 +35,41 @@ def transcribe_audio(audio_path: Path) -> str:
 
     wav_path = _convert_to_wav(audio_path)
     model = _get_model()
-    language = config.WHISPER_LANGUAGE or None
+    language = language or config.WHISPER_LANGUAGE or None
     segments, _info = model.transcribe(
         str(wav_path),
         language=language,
         vad_filter=True,
-        beam_size=5,
+        beam_size=config.WHISPER_BEAM_SIZE,
     )
 
-    lines = []
+    out = []
     for segment in segments:
-        start = _format_time(segment.start)
-        end = _format_time(segment.end)
         text = segment.text.strip()
         if text:
-            lines.append(f"[{start} - {end}] {text}")
+            out.append({"start": float(segment.start), "end": float(segment.end), "text": text})
 
-    if not lines:
+    if not out:
         raise RuntimeError("전사 결과가 비어 있습니다. 오디오가 무음이었거나 온라인 회의 오디오 공유가 정상적으로 녹음되지 않았을 수 있습니다.")
 
+    return out, wav_path
+
+
+def segments_to_text(segments: list[dict], include_speaker: bool = True) -> str:
+    """세그먼트 목록을 전사본 문자열로 변환한다.
+    include_speaker=True 면 speaker 라벨(화자 N)을 앞에 붙인다.
+    """
+    lines = []
+    for s in segments:
+        speaker = s.get("speaker") or ""
+        prefix = f"[{speaker}] " if (include_speaker and speaker) else ""
+        lines.append(f"{prefix}[{_format_time(s['start'])} - {_format_time(s['end'])}] {s['text']}")
     return "\n".join(lines)
+
+
+def transcribe_audio(audio_path: Path) -> str:
+    segments, _wav = transcribe_segments(audio_path)
+    return segments_to_text(segments)
 
 
 def _convert_to_wav(audio_path: Path) -> Path:

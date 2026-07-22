@@ -26,10 +26,36 @@ import {
   Waves,
   Upload,
   ExternalLink,
+  Loader2,
+  BarChart3,
 } from "lucide-react";
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
-const DEFAULT_NOTION_LOCATION = "LIKE Meeting Minutes";
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
+
+// 구글 로그인 토큰(모든 API 호출에 첨부)
+let AUTH_TOKEN = (typeof localStorage !== "undefined" && localStorage.getItem("id_token")) || null;
+function authHeaders() {
+  return AUTH_TOKEN ? { Authorization: "Bearer " + AUTH_TOKEN } : {};
+}
+function setAuthToken(t) {
+  AUTH_TOKEN = t || null;
+  if (typeof localStorage !== "undefined") {
+    if (t) localStorage.setItem("id_token", t);
+    else localStorage.removeItem("id_token");
+  }
+}
+
+// 브라우저에서 발생한 에러를 서버 로그로 보냄 (관리자가 수집·열람)
+function reportClientError(message, context) {
+  try {
+    fetch(API_BASE_URL + "/api/log/client", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify({ level: "error", message: String(message).slice(0, 2000), context: String(context || "").slice(0, 500) }),
+    }).catch(() => {});
+  } catch { /* 로깅 실패는 무시 */ }
+}
+const DEFAULT_NOTION_LOCATION = "LIKE Notion AI 회의록";
 const DEFAULT_NOTION_DESCRIPTION = "기본 회의록 페이지";
 const NEW_LINE = String.fromCharCode(10);
 const CARRIAGE_RETURN = String.fromCharCode(13);
@@ -139,13 +165,106 @@ export default function App() {
   const [participants, setParticipants] = useState([]);
   const [emailInput, setEmailInput] = useState("");
   const [emails, setEmails] = useState([]);
-  const [selectedSource, setSelectedSource] = useState("system");
+  const [selectedSource, setSelectedSource] = useState("mic");
   const [selectedFile, setSelectedFile] = useState(null);
   const [recordedFile, setRecordedFile] = useState(null);
   const [recordingStartedAt, setRecordingStartedAt] = useState(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState("");
+  const [departments, setDepartments] = useState([]);
+  const [selectedDepartment, setSelectedDepartment] = useState("");
+  const [registrant, setRegistrant] = useState("");
+  const [meetingDate, setMeetingDate] = useState(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  });
+  const [diarizeEnabled, setDiarizeEnabled] = useState(true);
+  const [summaryLang, setSummaryLang] = useState("ko");
+  const [transcribeLang, setTranscribeLang] = useState("ko");
+  const [elapsedSec, setElapsedSec] = useState(0);
+  const [etaSec, setEtaSec] = useState(0);
+  const [statsOpen, setStatsOpen] = useState(false);
+  const [authCfg, setAuthCfg] = useState(null);
+  const [currentUser, setCurrentUser] = useState(null);
+  const [authChecked, setAuthChecked] = useState(false);
+  const [listOpen, setListOpen] = useState(false);
+  const [logsOpen, setLogsOpen] = useState(false);
+  const [gisReady, setGisReady] = useState(false);
+
+  // 전역 브라우저 에러를 서버 로그로 수집
+  useEffect(() => {
+    const onError = (e) => reportClientError(e.message || "window error", (e.filename || "") + ":" + (e.lineno || ""));
+    const onRejection = (e) => reportClientError("unhandledrejection: " + (e.reason?.message || String(e.reason)), "");
+    window.addEventListener("error", onError);
+    window.addEventListener("unhandledrejection", onRejection);
+    return () => {
+      window.removeEventListener("error", onError);
+      window.removeEventListener("unhandledrejection", onRejection);
+    };
+  }, []);
+
+  // 로그인 설정 로드 + (필요 시) 구글 로그인 초기화
+  useEffect(() => {
+    fetch(API_BASE_URL + "/api/auth/config")
+      .then((r) => r.json())
+      .then((cfg) => {
+        setAuthCfg(cfg);
+        if (!cfg.auth_enabled) { setAuthChecked(true); return; }
+        if (AUTH_TOKEN) {
+          fetch(API_BASE_URL + "/api/auth/me", { headers: authHeaders() })
+            .then((r) => (r.ok ? r.json() : Promise.reject()))
+            .then((me) => { if (me.email) setCurrentUser(me); else setAuthToken(null); })
+            .catch(() => setAuthToken(null))
+            .finally(() => setAuthChecked(true));
+        } else {
+          setAuthChecked(true);
+        }
+        if (cfg.google_client_id) loadGoogleSignIn(cfg.google_client_id);
+      })
+      .catch(() => { setAuthCfg({ auth_enabled: false }); setAuthChecked(true); });
+  }, []);
+
+  const loadGoogleSignIn = (clientId) => {
+    const init = () => {
+      if (!window.google?.accounts?.id) return;
+      window.google.accounts.id.initialize({
+        client_id: clientId,
+        callback: (resp) => {
+          setAuthToken(resp.credential);
+          fetch(API_BASE_URL + "/api/auth/me", { headers: authHeaders() })
+            .then((r) => (r.ok ? r.json() : Promise.reject()))
+            .then((me) => { if (me.email) { setCurrentUser(me); setError(""); } })
+            .catch(() => { setAuthToken(null); setError("허용되지 않은 계정이거나 로그인에 실패했습니다."); reportClientError("로그인 실패 (auth/me 거부)", "login"); });
+        },
+      });
+      setGisReady(true);
+    };
+    if (window.google?.accounts?.id) { init(); return; }
+    if (document.getElementById("gsi-script")) return;
+    const s = document.createElement("script");
+    s.id = "gsi-script";
+    s.src = "https://accounts.google.com/gsi/client";
+    s.async = true;
+    s.onload = init;
+    document.head.appendChild(s);
+  };
+
+  // 로그인 화면이 보일 때 구글 버튼 렌더
+  useEffect(() => {
+    if (gisReady && authCfg?.auth_enabled && authChecked && !currentUser) {
+      const el = document.getElementById("gsi-button");
+      if (el && !el.hasChildNodes()) {
+        window.google.accounts.id.renderButton(el, { theme: "outline", size: "large", text: "signin_with", locale: "ko", width: 280 });
+      }
+    }
+  }, [gisReady, authCfg, authChecked, currentUser]);
+
+  const logout = () => {
+    setAuthToken(null);
+    setCurrentUser(null);
+    if (window.google?.accounts?.id) window.google.accounts.id.disableAutoSelect();
+  };
   const fileRef = useRef(null);
   const mediaRecorderRef = useRef(null);
   const mediaStreamRef = useRef(null);
@@ -165,6 +284,14 @@ export default function App() {
   const [isSendingEmail, setIsSendingEmail] = useState(false);
   const [manualEmailStatus, setManualEmailStatus] = useState("");
 
+  // 부서 목록을 불러온다.
+  useEffect(() => {
+    fetch(API_BASE_URL + "/api/meetings/departments", { headers: authHeaders() })
+      .then((r) => r.json())
+      .then((d) => setDepartments(Array.isArray(d.departments) ? d.departments : []))
+      .catch(() => setDepartments([]));
+  }, []);
+
   const status = useMemo(() => {
     if (isProcessing) return "회의록 생성 중";
     if (recordingState === "recording") return "녹음 중";
@@ -178,9 +305,6 @@ export default function App() {
   const displayParticipants = participants.length ? participants.join(", ") : "참가자 미지정";
   const displayDuration = formatDuration(meetingDurationSeconds || result?.duration_seconds || 0);
   const notes = result?.notes;
-  const transcriptItems = result?.transcript
-    ? result.transcript.split("\n").filter(Boolean).slice(0, 8).map((line, index) => ({ speaker: "전사 " + (index + 1), text: line }))
-    : sampleTranscript;
 
   const addParticipant = () => {
     const next = parseParticipantInput(participantInput);
@@ -532,6 +656,14 @@ export default function App() {
   };
 
   const processMeeting = async (file, explicitDurationSeconds) => {
+    if (!selectedDepartment) {
+      setError("부서를 먼저 선택해주세요.");
+      return;
+    }
+    if (!registrant.trim()) {
+      setError("등록자를 입력해주세요.");
+      return;
+    }
     let durationForRequest = explicitDurationSeconds || meetingDurationSeconds;
     if (!durationForRequest && recordingStartedAtRef.current) {
       durationForRequest = Math.max(1, Math.round((Date.now() - recordingStartedAtRef.current.getTime()) / 1000));
@@ -545,6 +677,11 @@ export default function App() {
     setError("");
     setResult(null);
 
+    // 예상 처리 시간(대략): 화자분리 켜면 더 오래. (실제는 하드웨어/길이에 따라 다름)
+    setEtaSec(Math.max(20, Math.round(durationForRequest * (diarizeEnabled ? 0.15 : 0.12))));
+    setElapsedSec(0);
+    const elapsedTimer = window.setInterval(() => setElapsedSec((s) => s + 1), 1000);
+
     const baseLogs = [
       { label: formatDuration(durationForRequest) + "짜리 회의 요약을 시작합니다", status: "done" },
       { label: "녹음 파일 준비", status: "done" },
@@ -553,20 +690,22 @@ export default function App() {
     setProcessingLogs(baseLogs);
 
     const timedMessages = [
-      "음성 파일을 분석 가능한 형식으로 변환 중",
-      "Whisper가 회의 음성을 텍스트로 변환 중",
-      "전사본을 정리하고 회의 내용을 확인 중",
-      "Claude가 회의 요약 JSON을 생성 중",
-      "Notion에 회의록 페이지를 저장 중",
-      emails.length ? "이메일 전달 준비 중" : "최종 결과를 정리 중",
+      "음성 파일을 분석 가능한 형식으로 변환하고 있어요",
+      "회의 음성을 텍스트로 받아쓰고 있어요 (길수록 오래 걸려요)",
+      "목소리를 구분해 화자를 나누고 있어요",
+      "대화 내용으로 화자와 참가자를 추측하고 있어요",
+      "AI가 회의 요약을 만들고 있어요",
+      "Notion에 회의록을 저장하고 있어요",
+      emails.length ? "이메일 전달을 준비하고 있어요" : "마무리하고 있어요",
     ];
     let messageIndex = 0;
     const progressTimer = window.setInterval(() => {
-      const message = timedMessages[Math.min(messageIndex, timedMessages.length - 1)];
+      // 마지막 단계에 도달하면 그 항목을 active(스피너) 상태로 유지 → 오래 걸려도 멈춘 것처럼 안 보임
+      if (messageIndex >= timedMessages.length) return;
+      const message = timedMessages[messageIndex];
       setProcessingLogs((prev) => {
         const withoutActive = prev.map((log) => log.status === "active" ? { ...log, status: "done" } : log);
-        const alreadyExists = withoutActive.some((log) => log.label === message);
-        if (alreadyExists) return withoutActive;
+        if (withoutActive.some((log) => log.label === message)) return withoutActive;
         return [...withoutActive, { label: message, status: "active" }];
       });
       messageIndex += 1;
@@ -579,17 +718,51 @@ export default function App() {
       form.append("participants", JSON.stringify(participants));
       form.append("emails", JSON.stringify(emails));
       form.append("duration_seconds", String(durationForRequest || 0));
+      form.append("department", selectedDepartment);
+      form.append("registrant", registrant.trim());
+      form.append("meeting_date", meetingDate || "");
+      form.append("diarize", diarizeEnabled ? "true" : "false");
+      form.append("summary_lang", summaryLang);
+      form.append("transcribe_lang", transcribeLang);
 
-      const controller = new AbortController();
-      const timeoutId = window.setTimeout(() => controller.abort(), 30 * 60 * 1000);
-      const response = await fetch(API_BASE_URL + "/api/meetings/process", {
+      // 1) 업로드 → 즉시 job_id 수신 (요청이 짧아 프록시 60초 타임아웃 회피)
+      const startResp = await fetch(API_BASE_URL + "/api/meetings/process", {
         method: "POST",
         body: form,
-        signal: controller.signal,
+        headers: authHeaders(),
       });
-      window.clearTimeout(timeoutId);
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.detail || "회의록 생성 실패");
+      const startData = await startResp.json();
+      if (!startResp.ok || !startData.job_id) {
+        throw new Error(startData.detail || startData.error || "회의록 생성 요청 실패");
+      }
+
+      // 2) 완료될 때까지 상태 폴링 (각 요청도 짧아 타임아웃 안 걸림)
+      const deadlineAt = Date.now() + 60 * 60 * 1000; // 최대 60분 대기
+      let data = null;
+      while (true) {
+        if (Date.now() > deadlineAt) {
+          throw new Error("화면 대기 시간이 초과됐어요. 서버는 계속 처리 중일 수 있으니 잠시 후 Notion에서 회의록을 확인해주세요.");
+        }
+        await new Promise((resolve) => window.setTimeout(resolve, 3000));
+        const statusResp = await fetch(
+          API_BASE_URL + "/api/meetings/status/" + startData.job_id, { headers: authHeaders() }
+        );
+        const statusData = await statusResp.json();
+        if (statusResp.status === 404) {
+          throw new Error("작업을 찾을 수 없습니다. 서버가 재시작되었을 수 있습니다.");
+        }
+        if (!statusResp.ok) {
+          throw new Error(statusData.detail || statusData.error || "상태 확인 실패");
+        }
+        if (statusData.status === "done") {
+          data = statusData.result;
+          break;
+        }
+        if (statusData.status === "error") {
+          throw new Error(statusData.error || "회의록 생성 실패");
+        }
+        // status === "processing" → 계속 폴링
+      }
       setResult(data);
       setManualEmailStatus("");
       setProcessingLogs((prev) => {
@@ -606,9 +779,11 @@ export default function App() {
       } else {
         setError(err.message || "회의록 생성 중 오류가 발생했습니다.");
       }
+      reportClientError("회의록 생성 실패: " + (err.message || err.name || "unknown"), "processMeeting");
       setProcessingLogs((prev) => [...prev.map((log) => log.status === "active" ? { ...log, status: "done" } : log), { label: "회의록 생성 중 오류 발생", status: "error" }]);
     } finally {
       window.clearInterval(progressTimer);
+      window.clearInterval(elapsedTimer);
       setIsProcessing(false);
     }
   };
@@ -632,7 +807,7 @@ export default function App() {
     try {
       const response = await fetch(API_BASE_URL + "/api/meetings/send-email", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...authHeaders() },
         body: JSON.stringify({
           emails: mergedEmails,
           notes: result.notes,
@@ -678,6 +853,46 @@ export default function App() {
     setError("");
   };
 
+  // 인증 설정/세션 확인이 끝나기 전에는 메인 화면을 그리지 않는다
+  // (메인 화면이 먼저 번쩍 보였다가 로그인 화면으로 바뀌는 것 방지)
+  if (!authCfg || !authChecked) {
+    return (
+      <main className="bg">
+        <div className="blur-a" />
+        <div className="blur-b" />
+        <div className="blur-c" />
+        <div className="login-gate">
+          <div className="login-card">
+            <div className="logo-icon" style={{ width: 56, height: 56, margin: "0 auto 18px" }}><Mic size={26} /></div>
+            <h1 className="h2" style={{ fontSize: 24 }}>LIKE meeting assistant</h1>
+            <p className="help" style={{ marginTop: 10 }}><Loader2 size={14} className="process-spin" /> 불러오는 중…</p>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  // 로그인 필수인데 아직 로그인 안 했으면 로그인 화면
+  if (authCfg?.auth_enabled && authChecked && !currentUser) {
+    return (
+      <main className="bg">
+        <div className="blur-a" />
+        <div className="blur-b" />
+        <div className="blur-c" />
+        <div className="login-gate">
+          <div className="login-card">
+            <div className="logo-icon" style={{ width: 56, height: 56, margin: "0 auto 18px" }}><Mic size={26} /></div>
+            <h1 className="h2" style={{ fontSize: 24 }}>LIKE meeting assistant</h1>
+            <p className="help" style={{ marginBottom: 22 }}>회사 구글 계정으로 로그인하세요. 본인이 만든 회의록만 볼 수 있습니다.</p>
+            <div id="gsi-button" style={{ display: "flex", justifyContent: "center" }} />
+            {!gisReady && <p className="help" style={{ marginTop: 14 }}><Loader2 size={14} className="process-spin" /> 로그인 버튼 불러오는 중…</p>}
+            {error && <div className="error" style={{ marginTop: 16 }}>{error}</div>}
+          </div>
+        </div>
+      </main>
+    );
+  }
+
   return (
     <main className="bg">
       <div className="blur-a" />
@@ -693,17 +908,32 @@ export default function App() {
               <p className="logo-sub">{status}</p>
             </div>
           </div>
-          <div className="steps">
-            <StepPill active={step === "setup"} done={step !== "setup"} label="설정" />
-            <ChevronRight size={16} color="#cbd5e1" />
-            <StepPill active={step === "recording"} done={step === "result"} label="녹음" />
-            <ChevronRight size={16} color="#cbd5e1" />
-            <StepPill active={step === "result"} done={false} label="결과" />
+          <div className="header-right">
+            {currentUser && <button className="stats-btn" type="button" onClick={() => setListOpen(true)}><FileText size={16} /> 회의록 목록</button>}
+            <button className="stats-btn" type="button" onClick={() => setStatsOpen(true)}><BarChart3 size={16} /> 이용 통계</button>
+            {currentUser?.role === "admin" && <button className="stats-btn" type="button" onClick={() => setLogsOpen(true)}><AudioLines size={16} /> 로그</button>}
+            {currentUser && (
+              <span className="user-chip" title={currentUser.email}>
+                {currentUser.name}{currentUser.role === "admin" ? " · 관리자" : currentUser.role === "ceo" ? " · 대표" : currentUser.role === "head" ? ` · ${currentUser.department} 본부장` : ""}
+                <button className="logout-btn" type="button" onClick={logout}>로그아웃</button>
+              </span>
+            )}
+            <div className="steps">
+              <StepPill active={step === "setup"} done={step !== "setup"} label="설정" />
+              <ChevronRight size={16} color="#cbd5e1" />
+              <StepPill active={step === "recording"} done={step === "result"} label="녹음" />
+              <ChevronRight size={16} color="#cbd5e1" />
+              <StepPill active={step === "result"} done={false} label="결과" />
+            </div>
           </div>
         </div>
       </header>
+      {statsOpen && <StatsModal onClose={() => setStatsOpen(false)} />}
+      {listOpen && <MeetingsListModal onClose={() => setListOpen(false)} currentUser={currentUser} />}
+      {logsOpen && <LogsModal onClose={() => setLogsOpen(false)} />}
 
-      <section className="container">
+      <section className={"container" + (step === "result" ? " container-result" : "")}>
+        {step !== "result" && (
         <aside className="stack">
           <motion.div className="card" initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }}>
             <div className="card-inner">
@@ -742,6 +972,67 @@ export default function App() {
               </div>
 
               <div className="field">
+                <FieldLabel title="부서" required />
+                <select
+                  className="input"
+                  value={selectedDepartment}
+                  onChange={(e) => setSelectedDepartment(e.target.value)}
+                >
+                  <option value="">부서를 선택하세요</option>
+                  {departments.map((d) => (
+                    <option key={d} value={d}>{d}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="field">
+                <FieldLabel title="등록자" required />
+                <input
+                  className="input"
+                  value={registrant}
+                  onChange={(e) => setRegistrant(e.target.value)}
+                  placeholder="회의록을 등록하는 사람 이름"
+                />
+              </div>
+
+              <div className="field">
+                <FieldLabel title="회의 일자" />
+                <input
+                  className="input"
+                  type="date"
+                  value={meetingDate}
+                  onChange={(e) => setMeetingDate(e.target.value)}
+                />
+                <p className="help">실제 회의가 열린 날짜입니다. (등록일과 별도로 기록)</p>
+              </div>
+
+              <div className="field">
+                <FieldLabel title="전사 언어" />
+                <select className="input" value={transcribeLang} onChange={(e) => setTranscribeLang(e.target.value)}>
+                  <option value="ko">한국어 (기본)</option>
+                  <option value="en">English</option>
+                  <option value="">자동 감지 (한·영 혼용)</option>
+                </select>
+                <p className="help">회의에서 말한 언어입니다. 한국어 회의는 그대로 두세요.</p>
+              </div>
+
+              <div className="field">
+                <FieldLabel title="회의록 언어" />
+                <select className="input" value={summaryLang} onChange={(e) => setSummaryLang(e.target.value)}>
+                  <option value="ko">한국어</option>
+                  <option value="en">English</option>
+                </select>
+                <p className="help">요약 회의록을 작성할 언어입니다. (전사본은 말한 언어 그대로 유지)</p>
+              </div>
+
+              <div className="field">
+                <label className="toggle-row">
+                  <input type="checkbox" checked={diarizeEnabled} onChange={(e) => setDiarizeEnabled(e.target.checked)} />
+                  <span><b>화자 구분</b> — 목소리별로 화자를 나눠 표시. <span className="toggle-hint">느려짐 · 기본 켜짐</span></span>
+                </label>
+              </div>
+
+              <div className="field">
                 <FieldLabel title="Notion 저장 위치" />
                 <div className="notion-box">
                   <div className="notion-icon"><FolderOpen size={20} /></div>
@@ -750,7 +1041,7 @@ export default function App() {
                     <p className="notion-desc">{DEFAULT_NOTION_DESCRIPTION}</p>
                   </div>
                 </div>
-                <p className="help">회의록 생성 시 이 위치에 자동 저장됩니다.</p>
+                <p className="help">회의록 생성 시 이 위치에 자동 저장됩니다. (부서·등록자·등록일이 함께 기록됩니다)</p>
               </div>
 
               <div className="field">
@@ -779,15 +1070,17 @@ export default function App() {
             <div className="card-inner">
               <h3 className="h2" style={{ fontSize: 20, marginBottom: 16 }}>저장/전달 설정</h3>
               <div className="summary-row">
-                <SummaryItem icon={Database} label="Notion" value={DEFAULT_NOTION_LOCATION + " · 자동 저장"} />
+                <SummaryItem icon={Database} label="Notion" value={(selectedDepartment ? selectedDepartment + " · " : "") + DEFAULT_NOTION_LOCATION} />
                 <SummaryItem icon={Mail} label="Email" value={emails.length ? emails.length + "명에게 전달" : "전달 안 함"} />
                 <SummaryItem icon={Users} label="Participants" value={displayParticipants} />
               </div>
             </div>
           </motion.div>
         </aside>
+        )}
 
         <section className="stack">
+          {step !== "result" && (
           <motion.div className="hero-card" initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.45 }}>
             <div className="hero-inner">
               <div className="hero-top">
@@ -800,8 +1093,8 @@ export default function App() {
               </div>
 
               <div className="source-grid">
-                <SourceButton active={selectedSource === "system"} icon={MonitorSpeaker} title="온라인 회의" desc="시스템/탭 오디오 녹음" onClick={() => { setSelectedSource("system"); resetAudioTester("온라인 회의 오디오를 다시 테스트해주세요."); }} />
                 <SourceButton active={selectedSource === "mic"} icon={Mic} title="오프라인 회의" desc="마이크로 바로 녹음" onClick={() => { setSelectedSource("mic"); resetAudioTester("마이크 입력을 다시 테스트해주세요."); }} />
+                <SourceButton active={selectedSource === "system"} icon={MonitorSpeaker} title="온라인 회의" desc="시스템/탭 오디오 녹음" onClick={() => { setSelectedSource("system"); resetAudioTester("온라인 회의 오디오를 다시 테스트해주세요."); }} />
               </div>
 
               <AudioTester
@@ -840,20 +1133,26 @@ export default function App() {
                     }
                   }} />
                   <button className="secondary" type="button" onClick={() => fileRef.current?.click()}><Upload size={18} /> {selectedFile ? selectedFile.name : recordedFile ? recordedFile.name : "오디오 파일 선택"}</button>
-                  {recordingState !== "recording" && recordingState !== "paused" && selectedFile && <button className="primary" onClick={processUploadedFile} disabled={isProcessing}><FileText size={18} /> 업로드 파일로 회의록 만들기</button>}
-                  {recordingState !== "recording" && recordingState !== "paused" && !selectedFile && <button className="primary" onClick={startRecording} disabled={audioTestState !== "ready" || isProcessing}><Play size={18} /> 회의 시작</button>}
+                  {recordingState !== "recording" && recordingState !== "paused" && selectedFile && <button className="primary" onClick={processUploadedFile} disabled={isProcessing || !selectedDepartment || !registrant.trim()}><FileText size={18} /> 업로드 파일로 회의록 만들기</button>}
+                  {recordingState !== "recording" && recordingState !== "paused" && !selectedFile && <button className="primary" onClick={startRecording} disabled={audioTestState !== "ready" || isProcessing || !selectedDepartment || !registrant.trim()}><Play size={18} /> 회의 시작</button>}
                   {recordingState === "recording" && <button className="secondary" onClick={pauseRecording}><Pause size={18} /> 일시정지</button>}
                   {recordingState === "paused" && <button className="primary" onClick={resumeRecording}><Play size={18} /> 다시 시작</button>}
                   {(recordingState === "recording" || recordingState === "paused") && <button className="danger" onClick={finishRecording} disabled={isProcessing}><Square size={18} /> 종료하고 회의록 만들기</button>}
                   {recordingState === "finished" && <button className="secondary" onClick={resetMeeting}><RotateCcw size={18} /> 새 회의 시작</button>}
+                  {recordingState !== "recording" && recordingState !== "paused" && (!selectedDepartment || !registrant.trim()) && (
+                    <p className="help" style={{ flexBasis: "100%", margin: 0, color: "var(--accent-strong)", fontWeight: 600 }}>
+                      회의록을 시작하려면 <b>회의 설정</b>에서 <b>부서</b>와 <b>등록자</b>를 먼저 입력하세요.
+                    </p>
+                  )}
                 </div>
               </div>
             </div>
           </motion.div>
+          )}
 
           {step === "setup" && <EmptyState />}
           {step === "recording" && <ProgressPanel recordingState={recordingState} />}
-          {step === "result" && <ResultPanel result={result} notes={notes} transcriptItems={transcriptItems} emails={emails} error={error} isProcessing={isProcessing} processingLogs={processingLogs} durationLabel={displayDuration} onSendEmail={sendEmailAfterMeeting} isSendingEmail={isSendingEmail} manualEmailStatus={manualEmailStatus} />}
+          {step === "result" && <ResultPanel result={result} notes={notes} participants={participants} emails={emails} error={error} isProcessing={isProcessing} processingLogs={processingLogs} durationLabel={displayDuration} elapsedSec={elapsedSec} etaSec={etaSec} onSendEmail={sendEmailAfterMeeting} isSendingEmail={isSendingEmail} manualEmailStatus={manualEmailStatus} onReset={resetMeeting} />}
         </section>
       </section>
     </main>
@@ -864,8 +1163,8 @@ function StepPill({ active, done, label }) {
   return <div className={"step-pill " + (active ? "active" : done ? "done" : "")}>{label}</div>;
 }
 
-function FieldLabel({ title, optional = false }) {
-  return <label className="label">{title}{optional && <span className="optional">선택</span>}</label>;
+function FieldLabel({ title, optional = false, required = false }) {
+  return <label className="label">{title}{required && <span className="required">필수</span>}{optional && <span className="optional">선택</span>}</label>;
 }
 
 function TagList({ items, onRemove, variant }) {
@@ -944,21 +1243,303 @@ function ProcessingLog({ logs }) {
     <p className="process-title">진행 상황</p>
     {logs.map((log, index) => (
       <div key={index + log.label} className={"process-log-row " + (log.status || "")}>
-        <span className="process-dot" />
+        {log.status === "active"
+          ? <Loader2 size={15} className="process-spin" />
+          : log.status === "done"
+            ? <CheckCircle2 size={15} className="process-check" />
+            : <span className="process-dot" />}
         <span>{log.label}</span>
       </div>
     ))}
   </div>;
 }
 
-function ResultPanel({ result, notes, transcriptItems, emails, error, isProcessing, processingLogs, durationLabel, onSendEmail, isSendingEmail, manualEmailStatus }) {
+function LogsModal({ onClose }) {
+  const [logs, setLogs] = useState(null);
+  const [errorsOnly, setErrorsOnly] = useState(true);
+  const [loading, setLoading] = useState(true);
+
+  const load = (eo) => {
+    setLoading(true);
+    fetch(API_BASE_URL + "/api/logs/recent?limit=300&errors_only=" + (eo ? "true" : "false"), { headers: authHeaders() })
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
+      .then((d) => { setLogs(d.logs || []); setLoading(false); })
+      .catch(() => { setLogs([]); setLoading(false); });
+  };
+  useEffect(() => { load(errorsOnly); }, [errorsOnly]);
+
+  const kindLabel = (k) => k === "access" ? "이용" : k === "error" ? "API에러" : k === "job-error" ? "처리에러" : k?.startsWith("client") ? "브라우저" : k;
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 680 }}>
+        <div className="modal-head">
+          <div>
+            <h3 className="h2" style={{ fontSize: 22 }}>이용/에러 로그</h3>
+            <p className="help">최근 7일 · {errorsOnly ? "에러만" : "전체"}{logs ? ` · ${logs.length}건` : ""}</p>
+          </div>
+          <button className="modal-close" type="button" onClick={onClose} aria-label="닫기"><X size={18} /></button>
+        </div>
+        <div className="stat-tabs">
+          <button type="button" className={"stat-tab " + (errorsOnly ? "active" : "")} onClick={() => setErrorsOnly(true)}>에러만</button>
+          <button type="button" className={"stat-tab " + (!errorsOnly ? "active" : "")} onClick={() => setErrorsOnly(false)}>전체 이용</button>
+          <button type="button" className="stat-tab" onClick={() => load(errorsOnly)}>새로고침</button>
+        </div>
+        {loading ? (
+          <p className="help" style={{ padding: "12px 0" }}><Loader2 size={15} className="process-spin" /> 불러오는 중…</p>
+        ) : !logs?.length ? (
+          <p className="help" style={{ padding: "12px 0" }}>기록이 없습니다.</p>
+        ) : (
+          <div className="stats-scroll" style={{ maxHeight: "62vh" }}>
+            {logs.map((l, i) => (
+              <div key={i} className={"log-row " + (l.kind !== "access" ? "log-err" : "")}>
+                <div className="log-row-top">
+                  <span className="log-kind">{kindLabel(l.kind)}</span>
+                  <span className="log-ts">{l.ts}</span>
+                  {l.user && <span className="log-user">{l.user}</span>}
+                </div>
+                <div className="log-body">
+                  {l.path ? `${l.method || ""} ${l.path}${l.status ? " → " + l.status : ""}${l.ms != null ? " (" + l.ms + "ms)" : ""}` : ""}
+                  {l.message ? l.message : ""}
+                  {l.error ? " " + l.error : ""}
+                  {l.context ? ` [${l.context}]` : ""}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function MeetingsListModal({ onClose, currentUser }) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [selected, setSelected] = useState(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+
+  useEffect(() => {
+    fetch(API_BASE_URL + "/api/meetings/list", { headers: authHeaders() })
+      .then((r) => r.json())
+      .then((d) => { setData(d); setLoading(false); })
+      .catch(() => { setData({ meetings: [] }); setLoading(false); });
+  }, []);
+
+  const openDetail = (id) => {
+    setDetailLoading(true);
+    setSelected({ loading: true });
+    fetch(API_BASE_URL + "/api/meetings/detail/" + id, { headers: authHeaders() })
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
+      .then((d) => setSelected(d))
+      .catch(() => setSelected({ error: "회의록을 열 수 없습니다." }))
+      .finally(() => setDetailLoading(false));
+  };
+
+  const scope = "내가 만든";
+  const meetings = data?.meetings || [];
+
+  // ── 상세 보기 ──
+  if (selected) {
+    const notes = selected.notes || {};
+    const segments = Array.isArray(selected.segments) ? selected.segments : [];
+    const turns = [];
+    for (const s of segments) {
+      const last = turns[turns.length - 1];
+      if (last && last.speaker === s.speaker) last.texts.push(s.text);
+      else turns.push({ speaker: s.speaker || "", texts: [s.text] });
+    }
+    const sections = [
+      { title: "요약", items: notes.summary ? [notes.summary] : [] },
+      { title: "참석자", items: notes.attendees || [] },
+      { title: "안건", items: notes.agenda || [] },
+      { title: "핵심 논의", items: notes.key_points || [] },
+      { title: "결정사항", items: notes.decisions || [] },
+      { title: "추가 논의 필요", items: notes.open_questions || [] },
+    ];
+    return (
+      <div className="modal-overlay" onClick={onClose}>
+        <div className="modal-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 620 }}>
+          <div className="modal-head">
+            <div style={{ minWidth: 0 }}>
+              <button className="back-btn" type="button" onClick={() => setSelected(null)}>← 목록</button>
+              <h3 className="h2" style={{ fontSize: 20, marginTop: 8 }}>{notes.title || "회의록"}</h3>
+              <p className="help">{[selected.department, selected.registrant, selected.meeting_date || selected.upload_date].filter(Boolean).join(" · ")}</p>
+            </div>
+            <button className="modal-close" type="button" onClick={onClose} aria-label="닫기"><X size={18} /></button>
+          </div>
+          {selected.loading || detailLoading ? (
+            <p className="help" style={{ padding: "12px 0" }}><Loader2 size={15} className="process-spin" /> 불러오는 중…</p>
+          ) : selected.error ? (
+            <div className="error">{selected.error}</div>
+          ) : (
+            <div className="stats-scroll" style={{ maxHeight: "66vh" }}>
+              {sections.map((sec) => sec.items.length > 0 && (
+                <div key={sec.title} className="note-block"><h4>{sec.title}</h4><ul>{sec.items.map((it, i) => <li key={i}>{it}</li>)}</ul></div>
+              ))}
+              {notes.action_items?.length > 0 && (
+                <div className="note-block"><h4>액션 아이템</h4><ul>{notes.action_items.map((it, i) => <li key={i}>{it.task} (담당: {it.owner || "미정"} / 기한: {it.due || "미정"})</li>)}</ul></div>
+              )}
+              {turns.length > 0 && (
+                <div className="note-block"><h4>전사</h4>
+                  {turns.map((t, i) => (
+                    <div key={i} style={{ marginBottom: 8 }}>
+                      {t.speaker && <span className="speaker">{t.speaker}</span>}
+                      <p className="help" style={{ margin: "4px 0 0" }}>{t.texts.join(" ")}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // ── 목록 ──
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 560 }}>
+        <div className="modal-head">
+          <div>
+            <h3 className="h2" style={{ fontSize: 22 }}>회의록 목록</h3>
+            <p className="help">{scope} 회의록{data ? ` · ${meetings.length}건` : ""} · 클릭해서 내용 보기 · 다른 회의록은 Notion에서</p>
+          </div>
+          <button className="modal-close" type="button" onClick={onClose} aria-label="닫기"><X size={18} /></button>
+        </div>
+        {loading ? (
+          <p className="help" style={{ padding: "12px 0" }}><Loader2 size={15} className="process-spin" /> 불러오는 중…</p>
+        ) : meetings.length === 0 ? (
+          <p className="help" style={{ padding: "12px 0" }}>볼 수 있는 회의록이 없습니다.</p>
+        ) : (
+          <div className="stats-scroll">
+            {meetings.map((m) => (
+              <button key={m.meeting_id} type="button" className="list-row list-row-btn" onClick={() => openDetail(m.meeting_id)}>
+                <div className="list-row-main">
+                  <b>{m.title}</b>
+                  <span className="list-row-meta">{m.department}{m.registrant ? " · " + m.registrant : ""}{m.meeting_date ? " · " + m.meeting_date : ""}</span>
+                </div>
+                <ChevronRight size={16} color="#94a3b8" />
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function StatBars({ rows }) {
+  const max = Math.max(1, ...rows.map((r) => r.count));
+  return (
+    <div className="stat-bars">
+      {rows.map((r) => (
+        <div key={r.name} className="stat-bar-row">
+          <span className="stat-bar-name" title={r.name}>{r.name}</span>
+          <div className="stat-bar-track"><div className="stat-bar-fill" style={{ width: `${Math.round((r.count / max) * 100)}%` }} /></div>
+          <span className="stat-bar-val">{r.count}건 · {r.minutes}분</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function StatsModal({ onClose }) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [tab, setTab] = useState("registrant");
+
+  useEffect(() => {
+    fetch(API_BASE_URL + "/api/stats/monthly", { headers: authHeaders() })
+      .then((r) => r.json())
+      .then((d) => { setData(d); setLoading(false); })
+      .catch(() => { setData({ months: [], total_count: 0, by_registrant: [], by_department: [] }); setLoading(false); });
+  }, []);
+
+  const months = data?.months || [];
+  const empty = !loading && (data?.total_count || 0) === 0;
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 560 }}>
+        <div className="modal-head">
+          <div>
+            <h3 className="h2" style={{ fontSize: 22 }}>이용 통계</h3>
+            {data && <p className="help">전체 <b>{data.total_count}건</b> · 총 <b>{data.total_minutes}분</b></p>}
+          </div>
+          <button className="modal-close" type="button" onClick={onClose} aria-label="닫기"><X size={18} /></button>
+        </div>
+        {loading ? (
+          <p className="help" style={{ padding: "12px 0" }}><Loader2 size={15} className="process-spin" /> 불러오는 중…</p>
+        ) : empty ? (
+          <p className="help" style={{ padding: "12px 0" }}>아직 기록이 없습니다.</p>
+        ) : (
+          <>
+            <div className="stat-tabs">
+              {[["registrant", "등록자별"], ["department", "부서별"], ["month", "월별"]].map(([k, label]) => (
+                <button key={k} type="button" className={"stat-tab " + (tab === k ? "active" : "")} onClick={() => setTab(k)}>{label}</button>
+              ))}
+            </div>
+            <div className="stats-scroll">
+              {tab === "registrant" && <StatBars rows={data.by_registrant || []} />}
+              {tab === "department" && <StatBars rows={data.by_department || []} />}
+              {tab === "month" && months.map((m) => (
+                <div key={m.month} className="stats-month">
+                  <div className="stats-month-head">
+                    <b>{m.month}</b>
+                    <span>{m.count}건 · {m.minutes}분</span>
+                  </div>
+                  <div className="stats-tags">
+                    {(m.by_registrant || []).map((r) => (
+                      <span key={r.name} className="tag">{r.name} <b>{r.count}</b></span>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ResultPanel({ result, notes, participants, emails, error, isProcessing, processingLogs, durationLabel, elapsedSec = 0, etaSec = 0, onSendEmail, isSendingEmail, manualEmailStatus, onReset }) {
   const [emailComposerOpen, setEmailComposerOpen] = useState(false);
   const [resultEmailInput, setResultEmailInput] = useState("");
   const [resultEmails, setResultEmails] = useState(emails || []);
+  const [speakerMap, setSpeakerMap] = useState({});
 
   useEffect(() => {
     setResultEmails(emails || []);
   }, [emails]);
+
+  // 새 결과가 오면 AI가 추측한 화자↔참가자 매핑으로 초기화(수정 가능)
+  useEffect(() => {
+    const guess = result?.speaker_guess;
+    setSpeakerMap(guess && typeof guess === "object" ? { ...guess } : {});
+  }, [result?.meeting_id]);
+
+  const segments = Array.isArray(result?.segments) ? result.segments : [];
+  // 등장 순서대로 고유 화자 목록
+  const speakers = [];
+  for (const s of segments) {
+    if (s.speaker && !speakers.includes(s.speaker)) speakers.push(s.speaker);
+  }
+  const nameFor = (sp) => (speakerMap[sp] && speakerMap[sp].trim()) || sp;
+
+  // 같은 화자의 연속 발화를 하나의 턴으로 묶기
+  const turns = [];
+  for (const s of segments) {
+    const last = turns[turns.length - 1];
+    if (last && last.speaker === s.speaker) last.texts.push(s.text);
+    else turns.push({ speaker: s.speaker || "", texts: [s.text] });
+  }
+  // segments가 없을 때(전사 실패 등)의 폴백: 전사본 텍스트를 줄단위로
+  const fallbackLines = (!segments.length && result?.transcript)
+    ? result.transcript.split("\n").filter(Boolean)
+    : [];
 
   const addResultEmail = () => {
     const next = parseEmailInput(resultEmailInput);
@@ -997,7 +1578,17 @@ function ResultPanel({ result, notes, transcriptItems, emails, error, isProcessi
 
   return <motion.div className="result-grid" initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35 }}>
     <div className="card"><div className="card-inner"><div className="section-title"><div><h3>회의 요약</h3><p>{durationLabel}짜리 회의 요약입니다. 회의록 생성 후 Notion에 자동 저장됩니다.</p></div><ListChecks size={24} color="#64748b" /></div>
-      {isProcessing && <div className="notice">{durationLabel}짜리 회의를 전사, Claude 요약, Notion 자동 저장 순서로 처리 중입니다.</div>}
+      <div className="summary-scroll">
+      {isProcessing && <div className="notice">{durationLabel}짜리 회의를 전사 → 화자 구분 → AI 요약 → Notion 저장 순서로 처리 중입니다. 회의가 길면 몇 분~수십 분 걸릴 수 있어요.</div>}
+      {isProcessing && (
+        <div className="progress-meter">
+          <div className="progress-meter-head">
+            <span><Loader2 size={14} className="process-spin" /> 경과 {Math.floor(elapsedSec / 60)}:{String(elapsedSec % 60).padStart(2, "0")}</span>
+            {etaSec > 0 && <span>예상 약 {Math.max(1, Math.round(etaSec / 60))}분</span>}
+          </div>
+          <div className="progress-bar"><div style={{ width: `${etaSec ? Math.min(99, Math.round((elapsedSec / etaSec) * 100)) : 5}%` }} /></div>
+        </div>
+      )}
       {processingLogs?.length > 0 && <ProcessingLog logs={processingLogs} />}
       {!isProcessing && !notes && <div className="notice">아직 생성된 회의록이 없습니다.</div>}
       {sections.map((section) => section.items.length > 0 && <div key={section.title} className="note-block"><h4>{section.title}</h4><ul>{section.items.map((item) => <li key={item}>{item}</li>)}</ul></div>)}
@@ -1007,10 +1598,47 @@ function ResultPanel({ result, notes, transcriptItems, emails, error, isProcessi
       {result?.email_sent && <div className="success">이메일 전달 완료: {sentCount}명</div>}
       {result?.email_error && <div className="error">이메일 전달 실패: {result.email_error}</div>}
       {error && <div className="error">{error}</div>}
+      </div>
     </div></div>
 
-    <div className="stack"><div className="card"><div className="card-inner"><div className="section-title"><h3>전사 미리보기</h3><FileText size={24} color="#64748b" /></div>{transcriptItems.map((item) => <div key={item.speaker} className="transcript-item"><span className="speaker">{item.speaker}</span><p className="help">{item.text}</p></div>)}</div></div>
-    <div className="card"><div className="card-inner"><h3 className="h2" style={{ fontSize: 22, marginBottom: 16 }}>최종 처리</h3><button className="final-btn" disabled><Save size={18} /> Notion 자동 저장</button><button className="outline-btn" disabled={!notes || isProcessing || isSendingEmail} onClick={sendResultEmail}><Send size={18} /> {isSendingEmail ? "이메일 보내는 중" : emailComposerOpen ? "입력한 이메일로 보내기" : "이메일 보내기"}{emailComposerOpen && resultEmails.length ? " (" + resultEmails.length + "명)" : ""}</button><p className="notice">Notion 업로드가 끝난 뒤에도 원하면 이메일을 보낼 수 있습니다. 이메일을 입력하고 바로 보내기를 눌러도 입력 중인 주소까지 함께 발송됩니다.</p>
+    <div className="stack"><div className="card"><div className="card-inner"><div className="section-title"><h3>전사 미리보기</h3><FileText size={24} color="#64748b" /></div>
+      {speakers.length > 0 && (
+        <div className="speaker-map">
+          <p className="speaker-map-title">화자 매칭 <span className="speaker-map-hint">(AI 추측 · 수정 가능)</span></p>
+          <datalist id="participant-options">{(participants || []).map((p) => <option key={p} value={p} />)}</datalist>
+          <div className="speaker-map-grid">
+            {speakers.map((sp) => (
+              <div key={sp} className="speaker-map-row">
+                <span className="speaker">{sp}</span>
+                <span className="speaker-map-arrow">→</span>
+                <input
+                  className="input speaker-map-input"
+                  list="participant-options"
+                  placeholder={"그대로 (" + sp + ")"}
+                  value={speakerMap[sp] || ""}
+                  onChange={(e) => setSpeakerMap((m) => ({ ...m, [sp]: e.target.value }))}
+                />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      <div className="transcript-scroll">
+        {turns.length > 0
+          ? turns.map((t, idx) => (
+              <div key={idx} className="transcript-item">
+                {t.speaker && <span className="speaker">{nameFor(t.speaker)}</span>}
+                <p className="help">{t.texts.join(" ")}</p>
+              </div>
+            ))
+          : fallbackLines.length > 0
+            ? fallbackLines.map((line, idx) => (
+                <div key={idx} className="transcript-item"><p className="help">{line}</p></div>
+              ))
+            : <p className="help">전사 내용이 아직 없습니다.</p>}
+      </div>
+    </div></div>
+    <div className="card"><div className="card-inner"><h3 className="h2" style={{ fontSize: 22, marginBottom: 16 }}>최종 처리</h3>{onReset && <button className="final-btn" onClick={onReset}><RotateCcw size={18} /> 새 회의 시작</button>}<button className="outline-btn" disabled style={{ marginBottom: 10 }}><Save size={18} /> Notion 자동 저장됨</button><button className="outline-btn" disabled={!notes || isProcessing || isSendingEmail} onClick={sendResultEmail}><Send size={18} /> {isSendingEmail ? "이메일 보내는 중" : emailComposerOpen ? "입력한 이메일로 보내기" : "이메일 보내기"}{emailComposerOpen && resultEmails.length ? " (" + resultEmails.length + "명)" : ""}</button><p className="notice">Notion 업로드가 끝난 뒤에도 원하면 이메일을 보낼 수 있습니다. 이메일을 입력하고 바로 보내기를 눌러도 입력 중인 주소까지 함께 발송됩니다.</p>
       {emailComposerOpen && <div className="result-email-box"><div className="input-row"><input className="input" value={resultEmailInput} onChange={(e) => setResultEmailInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addResultEmail(); } }} placeholder="이메일 입력 후 Enter 또는 추가" /><button className="add-btn" type="button" onClick={addResultEmail}><Plus size={20} /></button></div><TagList items={resultEmails} onRemove={removeResultEmail} variant="dark" />{!resultEmails.length && <p className="help">여러 명에게 보내려면 쉼표, 세미콜론, 줄바꿈 또는 Enter로 구분하세요.</p>}</div>}
       {manualEmailStatus && <div className={manualEmailStatus.includes("완료") ? "success" : manualEmailStatus.includes("오류") || manualEmailStatus.includes("실패") ? "error" : "notice"}>{manualEmailStatus}</div>}</div></div></div>
   </motion.div>;

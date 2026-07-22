@@ -1,4 +1,5 @@
 import json
+import re
 from typing import Any
 from anthropic import Anthropic
 from app import config
@@ -32,7 +33,7 @@ SYSTEM_PROMPT = """당신은 회의록 정리 전문가입니다.
 규칙:
 - 참석자 이름이 transcript에서 명확하지 않으면 빈 배열 반환
 - 추측하지 말고 transcript에 있는 내용만 사용
-- 한국어로 작성
+- 출력 언어는 사용자 프롬프트의 지시를 따른다
 - key_points와 decisions는 명확히 구분 (논의 vs 합의)
 """
 
@@ -48,6 +49,46 @@ EMPTY_NOTES = {
 }
 
 
+SPEAKER_MAP_SYSTEM = """당신은 회의 전사본에서 각 화자가 실제로 누구인지 추정하는 전문가입니다.
+화자 라벨(화자 1, 화자 2 ...)마다 대화 내용을 근거로 가장 가능성 높은 인물을 추정하세요.
+- 사용자가 제공한 참석자 목록이 있으면 그 중에서 우선 매칭합니다.
+- 목록에 없거나 애매하면, 대화에서 드러난 이름/호칭/역할(예: "김부장", "진행자")을 사용합니다.
+- 추정 근거가 전혀 없으면 그 화자는 결과에서 생략합니다.
+반드시 아래 JSON 형식으로만 응답하세요. 다른 텍스트 금지:
+{"화자 1": "추정이름", "화자 2": "추정이름"}
+"""
+
+
+def guess_speaker_mapping(transcript: str, speakers: list[str], participants: list[str] | None = None) -> dict[str, str]:
+    """각 화자 라벨에 대한 추정 인물명을 반환한다(best-effort). 실패 시 빈 dict."""
+    if not config.ANTHROPIC_API_KEY or not speakers or not transcript.strip():
+        return {}
+    try:
+        client = Anthropic(api_key=config.ANTHROPIC_API_KEY)
+        user_prompt = (
+            f"참석자 목록: {', '.join(participants or []) or '없음'}\n"
+            f"화자 목록: {', '.join(speakers)}\n\n"
+            f"전사본:\n{transcript}"
+        )
+        message = client.messages.create(
+            model=config.CLAUDE_MODEL,
+            max_tokens=500,
+            system=SPEAKER_MAP_SYSTEM,
+            messages=[{"role": "user", "content": user_prompt}],
+        )
+        text = "".join(block.text for block in message.content if getattr(block, "type", None) == "text")
+        data = _json_from_text(text)
+        if not isinstance(data, dict):
+            return {}
+        return {
+            str(k): str(v).strip()
+            for k, v in data.items()
+            if k in speakers and str(v).strip()
+        }
+    except Exception:
+        return {}
+
+
 def _json_from_text(text: str) -> dict[str, Any]:
     stripped = text.strip()
     if stripped.startswith("```"):
@@ -57,7 +98,7 @@ def _json_from_text(text: str) -> dict[str, Any]:
     return json.loads(stripped)
 
 
-def summarize_transcript(transcript: str, meeting_title: str = "", participants: list[str] | None = None) -> dict[str, Any]:
+def summarize_transcript(transcript: str, meeting_title: str = "", participants: list[str] | None = None, language: str = "ko") -> dict[str, Any]:
     if not config.ANTHROPIC_API_KEY:
         notes = dict(EMPTY_NOTES)
         notes["title"] = meeting_title or "회의록"
@@ -66,10 +107,19 @@ def summarize_transcript(transcript: str, meeting_title: str = "", participants:
         notes["key_points"] = ["전사본은 생성되었지만 Claude 요약 API 키가 없어 구조화 요약을 생성하지 못했습니다."]
         return notes
 
+    lang_instruction = (
+        "Write ALL meeting-note content (title, summary, agenda, key_points, decisions, "
+        "action items, open_questions, etc.) in ENGLISH, regardless of the transcript's language."
+        if language == "en"
+        else "회의록의 모든 내용(제목·요약·안건·핵심논의·결정사항·액션아이템 등)을 한국어로 작성하세요."
+    )
+
     client = Anthropic(api_key=config.ANTHROPIC_API_KEY)
     user_prompt = f"""
 회의 제목 후보: {meeting_title or "없음"}
 사용자가 UI에서 명시 입력한 참석자 목록: {", ".join(participants or []) or "없음"}
+
+출력 언어 지시: {lang_instruction}
 
 참석자 목록이 제공된 경우 transcript에 직접 언급되지 않아도 회의 메타데이터로 간주하여 attendees에 반드시 포함하세요.
 아래 전사본을 분석해서 지정된 JSON 스키마로만 응답하세요.
@@ -88,12 +138,14 @@ def summarize_transcript(transcript: str, meeting_title: str = "", participants:
 
     if meeting_title and (not notes.get("title") or notes.get("title") == "회의록"):
         notes["title"] = meeting_title
-    if participants:
-        existing_attendees = notes.get("attendees") or []
-        merged_attendees = []
-        for name in [*participants, *existing_attendees]:
-            value = str(name).strip()
-            if value and value not in merged_attendees:
-                merged_attendees.append(value)
-        notes["attendees"] = merged_attendees
+    existing_attendees = notes.get("attendees") or []
+    merged_attendees = []
+    for name in [*(participants or []), *existing_attendees]:
+        value = str(name).strip()
+        # "화자 1" 같은 자동 라벨은 실제 참석자가 아니므로 제외
+        if not value or re.fullmatch(r"화자\s*\d+", value):
+            continue
+        if value not in merged_attendees:
+            merged_attendees.append(value)
+    notes["attendees"] = merged_attendees
     return notes

@@ -1,3 +1,5 @@
+--extra-index-url https://download.pytorch.org/whl/cu121
+
 fastapi==0.115.6
 uvicorn[standard]==0.34.0
 python-multipart==0.0.20
@@ -9,3 +11,16 @@ faster-whisper==1.1.1
 pydantic==2.10.5
 
 requests==2.32.3
+
+# 구글 로그인(ID 토큰 검증)
+google-auth==2.35.0
+
+# faster-whisper(ctranslate2)가 NumPy 1.x 로 컴파일돼 있어 2.x 와 충돌 → 고정
+numpy==1.26.4
+
+# 화자 분리(diarization)
+torch==2.2.2
+torchaudio==2.2.2
+pyannote.audio==3.1.1
+# pyannote 3.1.1 은 hf_hub_download(use_auth_token=...) 를 사용 → 이를 지원하는 버전 고정
+huggingface_hub==0.25.2
