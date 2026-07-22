@@ -31,6 +31,8 @@ import {
 } from "lucide-react";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
+// 데모 빌드: 백엔드 없이 둘러보는 모드 (GitHub Pages 배포용)
+const DEMO = import.meta.env.VITE_DEMO === "true";
 
 // 구글 로그인 토큰(모든 API 호출에 첨부)
 let AUTH_TOKEN = (typeof localStorage !== "undefined" && localStorage.getItem("id_token")) || null;
@@ -884,8 +886,20 @@ export default function App() {
             <div className="logo-icon" style={{ width: 56, height: 56, margin: "0 auto 18px" }}><Mic size={26} /></div>
             <h1 className="h2" style={{ fontSize: 24 }}>LIKE meeting assistant</h1>
             <p className="help" style={{ marginBottom: 22 }}>회사 구글 계정으로 로그인하세요. 본인이 만든 회의록만 볼 수 있습니다.</p>
-            <div id="gsi-button" style={{ display: "flex", justifyContent: "center" }} />
-            {!gisReady && <p className="help" style={{ marginTop: 14 }}><Loader2 size={14} className="process-spin" /> 로그인 버튼 불러오는 중…</p>}
+            {DEMO ? (
+              <>
+                <button className="btn-primary" type="button" style={{ width: "100%" }}
+                  onClick={() => setCurrentUser({ email: "demo@example.com", name: "데모 사용자", role: "admin", department: null })}>
+                  데모로 둘러보기
+                </button>
+                <p className="help" style={{ marginTop: 14 }}>
+                  실제 배포판은 회사 구글 계정 로그인이 필요합니다. 이 데모는 가짜 데이터로 동작하며 서버에 아무것도 저장되지 않습니다.
+                </p>
+              </>
+            ) : (
+              <div id="gsi-button" style={{ display: "flex", justifyContent: "center" }} />
+            )}
+            {!DEMO && !gisReady && <p className="help" style={{ marginTop: 14 }}><Loader2 size={14} className="process-spin" /> 로그인 버튼 불러오는 중…</p>}
             {error && <div className="error" style={{ marginTop: 16 }}>{error}</div>}
           </div>
         </div>
@@ -904,8 +918,8 @@ export default function App() {
           <div className="logo">
             <div className="logo-icon"><Mic size={20} /></div>
             <div>
-              <h1 className="logo-title">LIKE meeting assistant</h1>
-              <p className="logo-sub">{status}</p>
+              <h1 className="logo-title">LIKE meeting assistant {DEMO && <span className="demo-badge">DEMO</span>}</h1>
+              <p className="logo-sub">{DEMO ? "데모 · 가짜 데이터로 동작합니다" : status}</p>
             </div>
           </div>
           <div className="header-right">

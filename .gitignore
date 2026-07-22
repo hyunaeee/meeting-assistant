@@ -66,4 +66,4 @@ Thumbs.db
 # Docker / cache
 # =========================
 docker-data/
-.cache/
+.cache/dist-demo/

@@ -118,6 +118,9 @@ button, input, textarea, select { font: inherit; }
 .stats-month-head span { color: var(--accent-strong); font-weight: 700; font-size: 14px; }
 .stats-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
 
+/* 데모 배지 */
+.demo-badge { display: inline-block; margin-left: 8px; padding: 2px 8px; border-radius: var(--r-pill); background: var(--accent); color: #fff; font-size: 10px; font-weight: 800; letter-spacing: 0.06em; vertical-align: middle; }
+
 /* 이용/에러 로그 */
 .log-row { border: 1px solid var(--border-soft); background: var(--surface-2); border-radius: var(--r-sm); padding: 10px 12px; }
 .log-row.log-err { border-color: oklch(88% 0.08 25); background: oklch(97% 0.02 25); }

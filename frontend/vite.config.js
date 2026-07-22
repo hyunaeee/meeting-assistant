@@ -9,8 +9,13 @@ const API_PROXY_TARGET = process.env.VITE_API_PROXY_TARGET || 'http://backend:80
 // 구글 로그인 팝업의 postMessage 가 COOP 에 막히지 않도록.
 const HEADERS = { 'Cross-Origin-Opener-Policy': 'same-origin-allow-popups' }
 
+// GitHub Pages 데모는 https://<user>.github.io/meeting-assistant/ 아래에 올라가므로
+// 데모 빌드일 때만 base 경로를 붙인다. (일반 배포는 루트 그대로)
+const BASE = process.env.VITE_DEMO === 'true' ? '/meeting-assistant/' : '/'
+
 // https://vitejs.dev/config/
 export default defineConfig({
+  base: BASE,
   plugins: [react()],
   server: {
     host: '0.0.0.0',
