@@ -28,6 +28,8 @@ import {
   ExternalLink,
   Loader2,
   BarChart3,
+  Check,
+  AlertCircle,
 } from "lucide-react";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
@@ -59,6 +61,28 @@ function reportClientError(message, context) {
 }
 const DEFAULT_NOTION_LOCATION = "LIKE Notion AI 회의록";
 const DEFAULT_NOTION_DESCRIPTION = "기본 회의록 페이지";
+
+// ── 진행 중인 회의록 작업(백그라운드 잡) 저장 ──────────────────────────────
+// 브라우저를 새로고침하거나 다른 회의를 만드는 동안에도 진행 상황이 유지되도록
+// localStorage 에 저장한다. (서버는 job_id 로 계속 처리 중)
+const JOBS_KEY = "active_jobs";
+function loadActiveJobs() {
+  try {
+    const jobs = JSON.parse(localStorage.getItem(JOBS_KEY) || "[]");
+    if (!Array.isArray(jobs)) return [];
+    // 하루 지난 완료/오류 기록은 정리
+    const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+    return jobs.filter((j) => j && (j.status === "processing" || (j.startedAt || 0) > cutoff));
+  } catch {
+    return [];
+  }
+}
+function saveActiveJobs(jobs) {
+  try {
+    localStorage.setItem(JOBS_KEY, JSON.stringify((jobs || []).slice(0, 12)));
+  } catch { /* 저장 실패는 무시 */ }
+}
+const sleep = (ms) => new Promise((r) => window.setTimeout(r, ms));
 const NEW_LINE = String.fromCharCode(10);
 const CARRIAGE_RETURN = String.fromCharCode(13);
 
@@ -186,6 +210,12 @@ export default function App() {
   const [transcribeLang, setTranscribeLang] = useState("ko");
   const [elapsedSec, setElapsedSec] = useState(0);
   const [etaSec, setEtaSec] = useState(0);
+  // 진행 중/완료된 회의록 작업 목록(우측 하단 패널 + 새로고침 후 재연결용)
+  const [activeJobs, setActiveJobs] = useState(() => loadActiveJobs());
+  const [, setNowTick] = useState(0);
+  const ownedJobsRef = useRef(new Set());      // 이번 세션에서 폴링 중인 job_id
+  const foregroundJobIdRef = useRef(null);     // 지금 화면(결과 탭)에 표시 중인 job_id
+  const fgTimersRef = useRef({ elapsed: null, progress: null });
   const [statsOpen, setStatsOpen] = useState(false);
   const [authCfg, setAuthCfg] = useState(null);
   const [currentUser, setCurrentUser] = useState(null);
@@ -657,6 +687,113 @@ export default function App() {
     await processMeeting(selectedFile, duration);
   };
 
+  // ── 백그라운드 잡 관리 ──────────────────────────────────────────────
+  // activeJobs 를 localStorage 에 저장 (새로고침 후 재연결용)
+  useEffect(() => { saveActiveJobs(activeJobs); }, [activeJobs]);
+
+  // 진행 중 잡이 있으면 1초마다 경과 시간 갱신
+  useEffect(() => {
+    if (!activeJobs.some((j) => j.status === "processing")) return;
+    const t = window.setInterval(() => setNowTick((n) => n + 1), 1000);
+    return () => window.clearInterval(t);
+  }, [activeJobs]);
+
+  const upsertJob = (id, patch) => {
+    setActiveJobs((prev) => {
+      const i = prev.findIndex((j) => j.id === id);
+      if (i === -1) return [{ id, ...patch }, ...prev].slice(0, 12);
+      const next = prev.slice();
+      next[i] = { ...next[i], ...patch };
+      return next;
+    });
+  };
+  const removeJob = (id) => setActiveJobs((prev) => prev.filter((j) => j.id !== id));
+
+  // 한 잡을 완료/오류/중단까지 견고하게 폴링한다.
+  // 일시적 네트워크·프록시 오류(504 HTML 응답 등)로는 절대 중단하지 않는다. ← 튕김 버그 수정
+  const pollJob = async (jobId, { onDone, onError, onStalled } = {}) => {
+    const startedAt = Date.now();
+    const HARD_DEADLINE = 3 * 60 * 60 * 1000; // 3시간
+    const MAX_FAILS = 40;                      // 연속 실패 40회(~2분)면 백그라운드 처리로 간주
+    let fails = 0;
+    while (true) {
+      await sleep(3000);
+      if (Date.now() - startedAt > HARD_DEADLINE) { onStalled && onStalled("deadline"); return; }
+      let statusData = null;
+      let ok = false;
+      try {
+        const r = await fetch(API_BASE_URL + "/api/meetings/status/" + jobId, { headers: authHeaders() });
+        const text = await r.text();
+        try { statusData = JSON.parse(text); } catch { statusData = null; }
+        ok = r.ok && !!statusData;
+      } catch { ok = false; }
+      if (!ok) {
+        fails += 1;
+        if (fails >= MAX_FAILS) { onStalled && onStalled("network"); return; }
+        continue; // 일시적 실패 → 무시하고 계속 폴링
+      }
+      fails = 0;
+      if (statusData.status === "done") { onDone && onDone(statusData.result); return; }
+      if (statusData.status === "error") { onError && onError(statusData.error || "회의록 생성 실패"); return; }
+      // status === "processing" → 계속
+    }
+  };
+
+  // 새로고침 등으로 이번 세션의 폴링이 끊긴 이전 잡을 백그라운드에서 다시 연결
+  useEffect(() => {
+    activeJobs.forEach((j) => {
+      if (j.status !== "processing" || ownedJobsRef.current.has(j.id)) return;
+      ownedJobsRef.current.add(j.id);
+      pollJob(j.id, {
+        onDone: (data) => upsertJob(j.id, { status: "done", result: data, notionUrl: data?.notion_url, notionError: data?.notion_error }),
+        onError: (msg) => upsertJob(j.id, { status: "error", error: msg }),
+        onStalled: () => upsertJob(j.id, { status: "stalled" }),
+      }).finally(() => ownedJobsRef.current.delete(j.id));
+    });
+    // 마운트 시 1회만 (복원된 잡 재연결)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // 완료된 백그라운드 잡을 화면(결과 탭)으로 불러오기
+  const viewJob = (job) => {
+    if (!job?.result) return;
+    foregroundJobIdRef.current = job.id;
+    setResult(job.result);
+    setError("");
+    setIsProcessing(false);
+    setMeetingDurationSeconds(0);
+    setProcessingLogs([
+      { label: "회의록 생성 완료", status: "done" },
+      ...(job.result.notion_url ? [{ label: "Notion 자동 저장 완료", status: "done" }] : []),
+      ...(job.result.notion_error ? [{ label: "Notion 저장 확인 필요", status: "error" }] : []),
+    ]);
+    setStep("result");
+  };
+
+  // 진행 중인 포그라운드 잡을 백그라운드로 돌리고 새 회의를 준비
+  const backgroundCurrent = () => {
+    foregroundJobIdRef.current = null;
+    window.clearInterval(fgTimersRef.current.elapsed);
+    window.clearInterval(fgTimersRef.current.progress);
+    setIsProcessing(false);
+    setResult(null);
+    setProcessingLogs([]);
+    setError("");
+    // 새 회의를 위한 최소 초기화 (부서·등록자·언어 설정은 유지)
+    setStep("setup");
+    setRecordingState("idle");
+    setSelectedFile(null);
+    setRecordedFile(null);
+    setRecordingStartedAt(null);
+    recordingStartedAtRef.current = null;
+    setMeetingTitle("");
+    setParticipants([]);
+    setMeetingDurationSeconds(0);
+    resetAudioTester();
+    mediaRecorderRef.current = null;
+    recordedChunksRef.current = [];
+  };
+
   const processMeeting = async (file, explicitDurationSeconds) => {
     if (!selectedDepartment) {
       setError("부서를 먼저 선택해주세요.");
@@ -680,7 +817,8 @@ export default function App() {
     setResult(null);
 
     // 예상 처리 시간(대략): 화자분리 켜면 더 오래. (실제는 하드웨어/길이에 따라 다름)
-    setEtaSec(Math.max(20, Math.round(durationForRequest * (diarizeEnabled ? 0.15 : 0.12))));
+    const etaSeconds = Math.max(20, Math.round(durationForRequest * (diarizeEnabled ? 0.15 : 0.12)));
+    setEtaSec(etaSeconds);
     setElapsedSec(0);
     const elapsedTimer = window.setInterval(() => setElapsedSec((s) => s + 1), 1000);
 
@@ -712,7 +850,11 @@ export default function App() {
       });
       messageIndex += 1;
     }, 6500);
+    // 백그라운드 전환 시 이 타이머들을 멈출 수 있게 보관
+    fgTimersRef.current = { elapsed: elapsedTimer, progress: progressTimer };
 
+    const displayTitle = meetingTitle.trim() || (formatDuration(durationForRequest) + " 회의");
+    let jobId = null;
     try {
       const form = new FormData();
       form.append("audio", file);
@@ -738,55 +880,66 @@ export default function App() {
         throw new Error(startData.detail || startData.error || "회의록 생성 요청 실패");
       }
 
-      // 2) 완료될 때까지 상태 폴링 (각 요청도 짧아 타임아웃 안 걸림)
-      const deadlineAt = Date.now() + 60 * 60 * 1000; // 최대 60분 대기
-      let data = null;
-      while (true) {
-        if (Date.now() > deadlineAt) {
-          throw new Error("화면 대기 시간이 초과됐어요. 서버는 계속 처리 중일 수 있으니 잠시 후 Notion에서 회의록을 확인해주세요.");
-        }
-        await new Promise((resolve) => window.setTimeout(resolve, 3000));
-        const statusResp = await fetch(
-          API_BASE_URL + "/api/meetings/status/" + startData.job_id, { headers: authHeaders() }
-        );
-        const statusData = await statusResp.json();
-        if (statusResp.status === 404) {
-          throw new Error("작업을 찾을 수 없습니다. 서버가 재시작되었을 수 있습니다.");
-        }
-        if (!statusResp.ok) {
-          throw new Error(statusData.detail || statusData.error || "상태 확인 실패");
-        }
-        if (statusData.status === "done") {
-          data = statusData.result;
-          break;
-        }
-        if (statusData.status === "error") {
-          throw new Error(statusData.error || "회의록 생성 실패");
-        }
-        // status === "processing" → 계속 폴링
-      }
-      setResult(data);
-      setManualEmailStatus("");
-      setProcessingLogs((prev) => {
-        const doneLogs = prev.map((log) => ({ ...log, status: "done" }));
-        const finalLogs = [...doneLogs, { label: "회의록 생성 완료", status: "done" }];
-        if (data.notion_url) finalLogs.push({ label: "Notion 자동 저장 완료", status: "done" });
-        if (data.notion_error) finalLogs.push({ label: "Notion 저장 확인 필요", status: "error" });
-        finalLogs.push({ label: "필요하면 아래에서 이메일을 보낼 수 있습니다", status: "done" });
-        return finalLogs;
+      // 이 잡을 목록/새로고침 재연결용으로 등록하고 화면 소유권을 준다.
+      jobId = startData.job_id;
+      ownedJobsRef.current.add(jobId);
+      foregroundJobIdRef.current = jobId;
+      upsertJob(jobId, {
+        title: displayTitle,
+        department: selectedDepartment,
+        meetingId: startData.meeting_id || "",
+        startedAt: Date.now(),
+        etaSeconds,
+        status: "processing",
+      });
+
+      // 2) 완료될 때까지 견고하게 폴링 (일시 오류로는 중단하지 않음)
+      await pollJob(jobId, {
+        onDone: (data) => {
+          upsertJob(jobId, { status: "done", result: data, notionUrl: data?.notion_url, notionError: data?.notion_error });
+          if (foregroundJobIdRef.current !== jobId) return; // 백그라운드로 돌린 경우 화면 갱신 안 함
+          setResult(data);
+          setManualEmailStatus("");
+          setProcessingLogs((prev) => {
+            const doneLogs = prev.map((log) => ({ ...log, status: "done" }));
+            const finalLogs = [...doneLogs, { label: "회의록 생성 완료", status: "done" }];
+            if (data.notion_url) finalLogs.push({ label: "Notion 자동 저장 완료", status: "done" });
+            if (data.notion_error) finalLogs.push({ label: "Notion 저장 확인 필요", status: "error" });
+            finalLogs.push({ label: "필요하면 아래에서 이메일을 보낼 수 있습니다", status: "done" });
+            return finalLogs;
+          });
+        },
+        onError: (msg) => {
+          upsertJob(jobId, { status: "error", error: msg });
+          reportClientError("회의록 생성 실패: " + msg, "processMeeting");
+          if (foregroundJobIdRef.current !== jobId) return;
+          setError(msg || "회의록 생성 중 오류가 발생했습니다.");
+          setProcessingLogs((prev) => [...prev.map((log) => log.status === "active" ? { ...log, status: "done" } : log), { label: "회의록 생성 중 오류 발생", status: "error" }]);
+        },
+        onStalled: () => {
+          // 서버는 계속 처리 중일 수 있음 → 목록에 남겨두고, 화면은 안내만
+          upsertJob(jobId, { status: "stalled" });
+          if (foregroundJobIdRef.current !== jobId) return;
+          setError("서버는 계속 처리 중일 수 있어요. 잠시 후 오른쪽 아래 '처리 중인 회의' 목록이나 Notion에서 확인해주세요.");
+          setProcessingLogs((prev) => [...prev.map((log) => log.status === "active" ? { ...log, status: "done" } : log), { label: "백그라운드에서 계속 처리 중", status: "active" }]);
+        },
       });
     } catch (err) {
-      if (err.name === "AbortError") {
-        setError("회의록 생성 시간이 너무 오래 걸려 중단되었습니다. 녹음 길이를 줄이거나 파일 업로드 방식으로 다시 시도해주세요.");
-      } else {
-        setError(err.message || "회의록 생성 중 오류가 발생했습니다.");
-      }
+      const msg = err.message || "회의록 생성 중 오류가 발생했습니다.";
+      if (jobId) upsertJob(jobId, { status: "error", error: msg });
       reportClientError("회의록 생성 실패: " + (err.message || err.name || "unknown"), "processMeeting");
-      setProcessingLogs((prev) => [...prev.map((log) => log.status === "active" ? { ...log, status: "done" } : log), { label: "회의록 생성 중 오류 발생", status: "error" }]);
+      if (foregroundJobIdRef.current === jobId || jobId === null) {
+        setError(msg);
+        setProcessingLogs((prev) => [...prev.map((log) => log.status === "active" ? { ...log, status: "done" } : log), { label: "회의록 생성 중 오류 발생", status: "error" }]);
+      }
     } finally {
       window.clearInterval(progressTimer);
       window.clearInterval(elapsedTimer);
-      setIsProcessing(false);
+      if (jobId) ownedJobsRef.current.delete(jobId);
+      if (foregroundJobIdRef.current === jobId) {
+        setIsProcessing(false);
+        // 완료 화면(결과)은 유지, 소유권만 해제
+      }
     }
   };
 
@@ -1166,10 +1319,53 @@ export default function App() {
 
           {step === "setup" && <EmptyState />}
           {step === "recording" && <ProgressPanel recordingState={recordingState} />}
-          {step === "result" && <ResultPanel result={result} notes={notes} participants={participants} emails={emails} error={error} isProcessing={isProcessing} processingLogs={processingLogs} durationLabel={displayDuration} elapsedSec={elapsedSec} etaSec={etaSec} onSendEmail={sendEmailAfterMeeting} isSendingEmail={isSendingEmail} manualEmailStatus={manualEmailStatus} onReset={resetMeeting} />}
+          {step === "result" && <ResultPanel result={result} notes={notes} participants={participants} emails={emails} error={error} isProcessing={isProcessing} processingLogs={processingLogs} durationLabel={displayDuration} elapsedSec={elapsedSec} etaSec={etaSec} onSendEmail={sendEmailAfterMeeting} isSendingEmail={isSendingEmail} manualEmailStatus={manualEmailStatus} onReset={resetMeeting} onBackground={backgroundCurrent} />}
         </section>
       </section>
+
+      <BackgroundJobs jobs={activeJobs} foregroundId={foregroundJobIdRef.current} onView={viewJob} onDismiss={removeJob} />
     </main>
+  );
+}
+
+// 우측 하단에 진행 중/완료된 회의록 작업을 띄운다.
+function BackgroundJobs({ jobs, foregroundId, onView, onDismiss }) {
+  const visible = (jobs || []).filter((j) => j.status !== "processing" || j.id !== foregroundId);
+  if (!visible.length) return null;
+  const fmtClock = (s) => `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
+  return (
+    <div className="bg-jobs">
+      {visible.map((j) => {
+        const elapsed = Math.max(0, Math.round((Date.now() - (j.startedAt || Date.now())) / 1000));
+        const eta = j.etaSeconds || 0;
+        const pct = j.status === "processing" && eta ? Math.min(97, Math.round((elapsed / eta) * 100)) : 100;
+        return (
+          <div key={j.id} className={"bg-job bg-" + j.status}>
+            <div className="bg-job-top">
+              <span className="bg-job-icon">
+                {j.status === "processing" ? <Loader2 size={15} className="process-spin" /> : j.status === "done" ? <Check size={15} /> : <AlertCircle size={15} />}
+              </span>
+              <span className="bg-job-title" title={j.title}>{j.title || "회의록"}</span>
+              <button className="bg-job-x" type="button" onClick={() => onDismiss(j.id)} aria-label="닫기"><X size={14} /></button>
+            </div>
+            {j.status === "processing" && (
+              <>
+                <div className="bg-job-bar"><span style={{ width: pct + "%" }} /></div>
+                <div className="bg-job-meta">회의록 만드는 중 · {fmtClock(elapsed)}{eta ? ` / 예상 ~${Math.round(eta / 60)}분` : ""}</div>
+              </>
+            )}
+            {j.status === "done" && (
+              <div className="bg-job-meta bg-job-actions">
+                <span>회의록 완료{j.notionError ? " · Notion 확인 필요" : j.notionUrl ? " · Notion 저장됨" : ""}</span>
+                <button className="bg-job-view" type="button" onClick={() => onView(j)}>결과 보기</button>
+              </div>
+            )}
+            {j.status === "error" && <div className="bg-job-meta">생성 실패{j.error ? ` · ${String(j.error).slice(0, 60)}` : ""}</div>}
+            {j.status === "stalled" && <div className="bg-job-meta">서버에서 계속 처리 중일 수 있어요. Notion에서 확인하세요.</div>}
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
@@ -1519,7 +1715,7 @@ function StatsModal({ onClose }) {
   );
 }
 
-function ResultPanel({ result, notes, participants, emails, error, isProcessing, processingLogs, durationLabel, elapsedSec = 0, etaSec = 0, onSendEmail, isSendingEmail, manualEmailStatus, onReset }) {
+function ResultPanel({ result, notes, participants, emails, error, isProcessing, processingLogs, durationLabel, elapsedSec = 0, etaSec = 0, onSendEmail, isSendingEmail, manualEmailStatus, onReset, onBackground }) {
   const [emailComposerOpen, setEmailComposerOpen] = useState(false);
   const [resultEmailInput, setResultEmailInput] = useState("");
   const [resultEmails, setResultEmails] = useState(emails || []);
@@ -1601,6 +1797,12 @@ function ResultPanel({ result, notes, participants, emails, error, isProcessing,
             {etaSec > 0 && <span>예상 약 {Math.max(1, Math.round(etaSec / 60))}분</span>}
           </div>
           <div className="progress-bar"><div style={{ width: `${etaSec ? Math.min(99, Math.round((elapsedSec / etaSec) * 100)) : 5}%` }} /></div>
+          {onBackground && (
+            <button className="bg-toggle-btn" type="button" onClick={onBackground}>
+              백그라운드로 돌리고 새 회의 준비하기
+            </button>
+          )}
+          <p className="help" style={{ marginTop: 6 }}>화면을 닫거나 새로고침해도 처리는 계속됩니다. 오른쪽 아래에서 진행 상황을 볼 수 있어요.</p>
         </div>
       )}
       {processingLogs?.length > 0 && <ProcessingLog logs={processingLogs} />}

@@ -118,6 +118,31 @@ button, input, textarea, select { font: inherit; }
 .stats-month-head span { color: var(--accent-strong); font-weight: 700; font-size: 14px; }
 .stats-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
 
+/* 처리 중인 회의 (우측 하단 백그라운드 잡 패널) */
+.bg-jobs { position: fixed; right: 18px; bottom: 18px; z-index: 60; display: flex; flex-direction: column; gap: 10px; width: min(340px, calc(100vw - 36px)); }
+.bg-job { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-sm); box-shadow: 0 8px 28px rgba(15, 23, 42, 0.12); padding: 12px 13px; }
+.bg-job.bg-done { border-color: var(--success); }
+.bg-job.bg-error { border-color: var(--danger); }
+.bg-job.bg-stalled { border-color: #f59e0b; }
+.bg-job-top { display: flex; align-items: center; gap: 8px; }
+.bg-job-icon { display: inline-flex; color: var(--accent); }
+.bg-done .bg-job-icon { color: var(--success); }
+.bg-error .bg-job-icon { color: var(--danger); }
+.bg-stalled .bg-job-icon { color: #f59e0b; }
+.bg-job-title { flex: 1; font-size: 13px; font-weight: 700; color: var(--foreground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bg-job-x { border: none; background: transparent; color: var(--muted); cursor: pointer; padding: 2px; display: inline-flex; border-radius: 6px; }
+.bg-job-x:hover { background: var(--surface-2); color: var(--foreground); }
+.bg-job-bar { height: 5px; border-radius: var(--r-pill); background: var(--surface-2); overflow: hidden; margin: 9px 0 6px; }
+.bg-job-bar > span { display: block; height: 100%; background: var(--accent); border-radius: var(--r-pill); transition: width 0.6s ease; }
+.bg-job-meta { font-size: 12px; color: var(--muted); }
+.bg-job-actions { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 6px; }
+.bg-job-view { border: 1px solid var(--accent); background: var(--accent); color: #fff; font-size: 12px; font-weight: 700; padding: 4px 12px; border-radius: var(--r-pill); cursor: pointer; white-space: nowrap; }
+.bg-job-view:hover { background: var(--accent-strong); border-color: var(--accent-strong); }
+
+/* 처리 화면의 '백그라운드로 돌리기' 버튼 */
+.bg-toggle-btn { margin-top: 12px; width: 100%; border: 1px solid var(--border); background: var(--surface-2); color: var(--foreground); font-size: 13px; font-weight: 700; padding: 9px 12px; border-radius: var(--r-sm); cursor: pointer; }
+.bg-toggle-btn:hover { border-color: var(--accent); color: var(--accent-strong); }
+
 /* 데모 배지 */
 .demo-badge { display: inline-block; margin-left: 8px; padding: 2px 8px; border-radius: var(--r-pill); background: var(--accent); color: #fff; font-size: 10px; font-weight: 800; letter-spacing: 0.06em; vertical-align: middle; }
 
