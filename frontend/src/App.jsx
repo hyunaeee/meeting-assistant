@@ -60,7 +60,9 @@ function reportClientError(message, context) {
     }).catch(() => {});
   } catch { /* 로깅 실패는 무시 */ }
 }
-const DEFAULT_NOTION_LOCATION = "LIKE Notion AI 회의록";
+// 데모(공개 사이트)에서는 회사명 대신 일반 명칭을 쓴다. 실제 사내 앱은 그대로.
+const APP_NAME = DEMO ? "사내 회의 어시스턴트" : "LIKE meeting assistant";
+const DEFAULT_NOTION_LOCATION = DEMO ? "사내 회의록" : "LIKE Notion AI 회의록";
 const DEFAULT_NOTION_DESCRIPTION = "기본 회의록 페이지";
 
 // ── 진행 중인 회의록 작업(백그라운드 잡) 저장 ──────────────────────────────
@@ -293,6 +295,9 @@ export default function App() {
   const [listOpen, setListOpen] = useState(false);
   const [logsOpen, setLogsOpen] = useState(false);
   const [gisReady, setGisReady] = useState(false);
+
+  // 브라우저 탭 제목을 앱 이름으로 설정 (데모에서는 회사명 노출 방지)
+  useEffect(() => { document.title = APP_NAME; }, []);
 
   // 전역 브라우저 에러를 서버 로그로 수집
   useEffect(() => {
@@ -1160,7 +1165,7 @@ export default function App() {
         <div className="login-gate">
           <div className="login-card">
             <div className="logo-icon" style={{ width: 56, height: 56, margin: "0 auto 18px" }}><Mic size={26} /></div>
-            <h1 className="h2" style={{ fontSize: 24 }}>LIKE meeting assistant</h1>
+            <h1 className="h2" style={{ fontSize: 24 }}>{APP_NAME}</h1>
             <p className="help" style={{ marginTop: 10 }}><Loader2 size={14} className="process-spin" /> 불러오는 중…</p>
           </div>
         </div>
@@ -1178,7 +1183,7 @@ export default function App() {
         <div className="login-gate">
           <div className="login-card">
             <div className="logo-icon" style={{ width: 56, height: 56, margin: "0 auto 18px" }}><Mic size={26} /></div>
-            <h1 className="h2" style={{ fontSize: 24 }}>LIKE meeting assistant</h1>
+            <h1 className="h2" style={{ fontSize: 24 }}>{APP_NAME}</h1>
             <p className="help" style={{ marginBottom: 22 }}>회사 구글 계정으로 로그인하세요. 본인이 만든 회의록만 볼 수 있습니다.</p>
             {DEMO ? (
               <>
@@ -1212,7 +1217,7 @@ export default function App() {
           <div className="logo">
             <div className="logo-icon"><Mic size={20} /></div>
             <div>
-              <h1 className="logo-title">LIKE meeting assistant {DEMO && <span className="demo-badge">DEMO</span>}</h1>
+              <h1 className="logo-title">{APP_NAME} {DEMO && <span className="demo-badge">DEMO</span>}</h1>
               <p className="logo-sub">{DEMO ? "데모 · 가짜 데이터로 동작합니다" : status}</p>
             </div>
           </div>
