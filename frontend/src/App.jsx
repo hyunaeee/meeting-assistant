@@ -852,7 +852,7 @@ export default function App() {
     setMeetingDurationSeconds(0);
     setProcessingLogs([
       { label: "회의록 생성 완료", status: "done" },
-      ...(job.result.notion_url ? [{ label: "Notion 자동 저장 완료", status: "done" }] : []),
+      ...(job.result.notion_url && currentUser?.role === "admin" ? [{ label: "Notion 자동 저장 완료", status: "done" }] : []),
     ]);
     setStep("result");
   };
@@ -994,7 +994,7 @@ export default function App() {
           setProcessingLogs((prev) => {
             const doneLogs = prev.map((log) => ({ ...log, status: "done" }));
             const finalLogs = [...doneLogs, { label: "회의록 생성 완료", status: "done" }];
-            if (data.notion_url) finalLogs.push({ label: "Notion 자동 저장 완료", status: "done" });
+            if (data.notion_url && currentUser?.role === "admin") finalLogs.push({ label: "Notion 자동 저장 완료", status: "done" });
             finalLogs.push({ label: "필요하면 아래에서 이메일을 보낼 수 있습니다", status: "done" });
             return finalLogs;
           });
@@ -1374,17 +1374,6 @@ export default function App() {
               </div>
             </div>
           </motion.div>
-
-          <motion.div className="card" initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4, delay: 0.08 }}>
-            <div className="card-inner">
-              <h3 className="h2" style={{ fontSize: 20, marginBottom: 16 }}>저장/전달 설정</h3>
-              <div className="summary-row">
-                <SummaryItem icon={Database} label="Notion" value={(selectedDepartment ? selectedDepartment + " · " : "") + DEFAULT_NOTION_LOCATION} />
-                <SummaryItem icon={Mail} label="Email" value={emails.length ? emails.length + "명에게 전달" : "전달 안 함"} />
-                <SummaryItem icon={Users} label="Participants" value={displayParticipants} />
-              </div>
-            </div>
-          </motion.div>
         </aside>
         )}
 
@@ -1460,19 +1449,30 @@ export default function App() {
           </motion.div>
           )}
 
-          {step === "setup" && <EmptyState />}
+          {step === "setup" && (
+            <motion.div className="card" initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4, delay: 0.08 }}>
+              <div className="card-inner">
+                <h3 className="h2" style={{ fontSize: 20, marginBottom: 16 }}>저장/전달 설정</h3>
+                <div className="summary-row">
+                  <SummaryItem icon={Database} label="Notion" value={(selectedDepartment ? selectedDepartment + " · " : "") + DEFAULT_NOTION_LOCATION} />
+                  <SummaryItem icon={Mail} label="Email" value={emails.length ? emails.length + "명에게 전달" : "전달 안 함"} />
+                  <SummaryItem icon={Users} label="Participants" value={displayParticipants} />
+                </div>
+              </div>
+            </motion.div>
+          )}
           {step === "recording" && <ProgressPanel recordingState={recordingState} />}
-          {step === "result" && <ResultPanel result={result} notes={notes} participants={participants} emails={emails} error={error} isProcessing={isProcessing} processingLogs={processingLogs} durationLabel={displayDuration} elapsedSec={elapsedSec} etaSec={etaSec} onSendEmail={sendEmailAfterMeeting} isSendingEmail={isSendingEmail} manualEmailStatus={manualEmailStatus} onReset={resetMeeting} onBackground={backgroundCurrent} recordedFile={recordedFile} recordingSecured={recordingSecured} onDownloadRecording={downloadRecording} onRetry={retryProcessRecording} uploadDone={uploadDone} />}
+          {step === "result" && <ResultPanel result={result} notes={notes} participants={participants} emails={emails} error={error} isProcessing={isProcessing} processingLogs={processingLogs} durationLabel={displayDuration} elapsedSec={elapsedSec} etaSec={etaSec} onSendEmail={sendEmailAfterMeeting} isSendingEmail={isSendingEmail} manualEmailStatus={manualEmailStatus} onReset={resetMeeting} onBackground={backgroundCurrent} recordedFile={recordedFile} recordingSecured={recordingSecured} onDownloadRecording={downloadRecording} onRetry={retryProcessRecording} uploadDone={uploadDone} isAdmin={currentUser?.role === "admin"} />}
         </section>
       </section>
 
-      <BackgroundJobs jobs={activeJobs} foregroundId={foregroundJobIdRef.current} onView={viewJob} onDismiss={removeJob} />
+      <BackgroundJobs jobs={activeJobs} foregroundId={foregroundJobIdRef.current} onView={viewJob} onDismiss={removeJob} isAdmin={currentUser?.role === "admin"} />
     </main>
   );
 }
 
 // 우측 하단에 진행 중/완료된 회의록 작업을 띄운다.
-function BackgroundJobs({ jobs, foregroundId, onView, onDismiss }) {
+function BackgroundJobs({ jobs, foregroundId, onView, onDismiss, isAdmin }) {
   const visible = (jobs || []).filter((j) => j.status !== "processing" || j.id !== foregroundId);
   if (!visible.length) return null;
   const fmtClock = (s) => `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
@@ -1499,7 +1499,7 @@ function BackgroundJobs({ jobs, foregroundId, onView, onDismiss }) {
             )}
             {j.status === "done" && (
               <div className="bg-job-meta bg-job-actions">
-                <span>회의록 완료{j.notionUrl ? " · Notion 저장됨" : ""}</span>
+                <span>회의록 완료{isAdmin && j.notionUrl ? " · Notion 저장됨" : ""}</span>
                 <button className="bg-job-view" type="button" onClick={() => onView(j)}>결과 보기</button>
               </div>
             )}
@@ -1577,10 +1577,6 @@ function AudioTester({ selectedSource, audioLevel, audioTestState, audioTestMess
       </div>
     </div>
   );
-}
-
-function EmptyState() {
-  return <motion.div className="card" initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35 }}><div className="card-inner" style={{ minHeight: 250, display: "grid", placeItems: "center", textAlign: "center" }}><div><div className="icon-box" style={{ margin: "0 auto 18px", width: 64, height: 64 }}><Mic size={30} /></div><h3 className="h2" style={{ fontSize: 22 }}>회의 준비가 끝나면 바로 시작하세요.</h3><p className="help">브라우저에서 바로 녹음하거나 오디오 파일을 선택한 뒤 회의록 만들기를 누르면 Notion에 자동 저장됩니다.</p></div></div></motion.div>;
 }
 
 function ProgressPanel({ recordingState }) {
@@ -1881,7 +1877,7 @@ function CopyNotesButton({ notes, meta, className, label = "회의록 복사" })
   );
 }
 
-function ResultPanel({ result, notes, participants, emails, error, isProcessing, processingLogs, durationLabel, elapsedSec = 0, etaSec = 0, onSendEmail, isSendingEmail, manualEmailStatus, onReset, onBackground, recordedFile, recordingSecured, onDownloadRecording, onRetry, uploadDone }) {
+function ResultPanel({ result, notes, participants, emails, error, isProcessing, processingLogs, durationLabel, elapsedSec = 0, etaSec = 0, onSendEmail, isSendingEmail, manualEmailStatus, onReset, onBackground, recordedFile, recordingSecured, onDownloadRecording, onRetry, uploadDone, isAdmin }) {
   const [emailComposerOpen, setEmailComposerOpen] = useState(false);
   const [resultEmailInput, setResultEmailInput] = useState("");
   const [resultEmails, setResultEmails] = useState(emails || []);
@@ -2003,7 +1999,7 @@ function ResultPanel({ result, notes, participants, emails, error, isProcessing,
       )}
       {sections.map((section) => section.items.length > 0 && <div key={section.title} className="note-block"><h4>{section.title}</h4><ul>{section.items.map((item) => <li key={item}>{item}</li>)}</ul></div>)}
       {notes?.action_items?.length > 0 && <div className="note-block"><h4>액션 아이템</h4><ul>{notes.action_items.map((item, idx) => <li key={idx}>{item.task} (담당: {item.owner || "미정"} / 기한: {item.due || "미정"})</li>)}</ul></div>}
-      {result?.notion_url && <div className="success">Notion 자동 저장 완료: <a href={result.notion_url} target="_blank" rel="noreferrer">열기 <ExternalLink size={13} /></a></div>}
+      {isAdmin && result?.notion_url && <div className="success">Notion 자동 저장 완료: <a href={result.notion_url} target="_blank" rel="noreferrer">열기 <ExternalLink size={13} /></a></div>}
       {result?.email_sent && <div className="success">이메일 전달 완료: {sentCount}명</div>}
       {result?.email_error && <div className="error">이메일 전달 실패: {result.email_error}</div>}
       {error && <div className="error">{error}</div>}
@@ -2047,7 +2043,7 @@ function ResultPanel({ result, notes, participants, emails, error, isProcessing,
             : <p className="help">전사 내용이 아직 없습니다.</p>}
       </div>
     </div></div>
-    <div className="card"><div className="card-inner"><h3 className="h2" style={{ fontSize: 22, marginBottom: 16 }}>최종 처리</h3>{onReset && <button className="final-btn" onClick={onReset}><RotateCcw size={18} /> 새 회의 시작</button>}<button className="outline-btn" disabled style={{ marginBottom: 10 }}><Save size={18} /> Notion 자동 저장됨</button><button className="outline-btn" disabled={!notes || isProcessing || isSendingEmail} onClick={sendResultEmail}><Send size={18} /> {isSendingEmail ? "이메일 보내는 중" : emailComposerOpen ? "입력한 이메일로 보내기" : "이메일 보내기"}{emailComposerOpen && resultEmails.length ? " (" + resultEmails.length + "명)" : ""}</button><p className="notice">Notion 업로드가 끝난 뒤에도 원하면 이메일을 보낼 수 있습니다. 이메일을 입력하고 바로 보내기를 눌러도 입력 중인 주소까지 함께 발송됩니다.</p>
+    <div className="card"><div className="card-inner"><h3 className="h2" style={{ fontSize: 22, marginBottom: 16 }}>최종 처리</h3>{onReset && <button className="final-btn" onClick={onReset}><RotateCcw size={18} /> 새 회의 시작</button>}{isAdmin && <button className="outline-btn" disabled style={{ marginBottom: 10 }}><Save size={18} /> Notion 자동 저장됨</button>}<button className="outline-btn" disabled={!notes || isProcessing || isSendingEmail} onClick={sendResultEmail}><Send size={18} /> {isSendingEmail ? "이메일 보내는 중" : emailComposerOpen ? "입력한 이메일로 보내기" : "이메일 보내기"}{emailComposerOpen && resultEmails.length ? " (" + resultEmails.length + "명)" : ""}</button><p className="notice">회의록이 만들어진 뒤에도 원하면 이메일을 보낼 수 있습니다. 이메일을 입력하고 바로 보내기를 눌러도 입력 중인 주소까지 함께 발송됩니다.</p>
       {emailComposerOpen && <div className="result-email-box"><div className="input-row"><input className="input" value={resultEmailInput} onChange={(e) => setResultEmailInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addResultEmail(); } }} placeholder="이메일 입력 후 Enter 또는 추가" /><button className="add-btn" type="button" onClick={addResultEmail}><Plus size={20} /></button></div><TagList items={resultEmails} onRemove={removeResultEmail} variant="dark" />{!resultEmails.length && <p className="help">여러 명에게 보내려면 쉼표, 세미콜론, 줄바꿈 또는 Enter로 구분하세요.</p>}</div>}
       {manualEmailStatus && <div className={manualEmailStatus.includes("완료") ? "success" : manualEmailStatus.includes("오류") || manualEmailStatus.includes("실패") ? "error" : "notice"}>{manualEmailStatus}</div>}</div></div></div>
   </motion.div>;
