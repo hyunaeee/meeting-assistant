@@ -853,7 +853,6 @@ export default function App() {
     setProcessingLogs([
       { label: "회의록 생성 완료", status: "done" },
       ...(job.result.notion_url ? [{ label: "Notion 자동 저장 완료", status: "done" }] : []),
-      ...(job.result.notion_error ? [{ label: "Notion 저장 확인 필요", status: "error" }] : []),
     ]);
     setStep("result");
   };
@@ -996,7 +995,6 @@ export default function App() {
             const doneLogs = prev.map((log) => ({ ...log, status: "done" }));
             const finalLogs = [...doneLogs, { label: "회의록 생성 완료", status: "done" }];
             if (data.notion_url) finalLogs.push({ label: "Notion 자동 저장 완료", status: "done" });
-            if (data.notion_error) finalLogs.push({ label: "Notion 저장 확인 필요", status: "error" });
             finalLogs.push({ label: "필요하면 아래에서 이메일을 보낼 수 있습니다", status: "done" });
             return finalLogs;
           });
@@ -1501,7 +1499,7 @@ function BackgroundJobs({ jobs, foregroundId, onView, onDismiss }) {
             )}
             {j.status === "done" && (
               <div className="bg-job-meta bg-job-actions">
-                <span>회의록 완료{j.notionError ? " · Notion 확인 필요" : j.notionUrl ? " · Notion 저장됨" : ""}</span>
+                <span>회의록 완료{j.notionUrl ? " · Notion 저장됨" : ""}</span>
                 <button className="bg-job-view" type="button" onClick={() => onView(j)}>결과 보기</button>
               </div>
             )}
@@ -2006,7 +2004,6 @@ function ResultPanel({ result, notes, participants, emails, error, isProcessing,
       {sections.map((section) => section.items.length > 0 && <div key={section.title} className="note-block"><h4>{section.title}</h4><ul>{section.items.map((item) => <li key={item}>{item}</li>)}</ul></div>)}
       {notes?.action_items?.length > 0 && <div className="note-block"><h4>액션 아이템</h4><ul>{notes.action_items.map((item, idx) => <li key={idx}>{item.task} (담당: {item.owner || "미정"} / 기한: {item.due || "미정"})</li>)}</ul></div>}
       {result?.notion_url && <div className="success">Notion 자동 저장 완료: <a href={result.notion_url} target="_blank" rel="noreferrer">열기 <ExternalLink size={13} /></a></div>}
-      {result?.notion_error && <div className="error">Notion 저장 실패: {result.notion_error}</div>}
       {result?.email_sent && <div className="success">이메일 전달 완료: {sentCount}명</div>}
       {result?.email_error && <div className="error">이메일 전달 실패: {result.email_error}</div>}
       {error && <div className="error">{error}</div>}
