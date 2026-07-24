@@ -262,6 +262,8 @@ export default function App() {
   // 녹음이 서버에 업로드됐거나(=안전) 사용자가 파일로 내려받았는지 여부.
   // false 이면 녹음이 아직 이 브라우저 메모리에만 있어 유실 위험이 있음.
   const [recordingSecured, setRecordingSecured] = useState(false);
+  // 서버 업로드가 끝났는지(=닫아도 서버가 회의록을 자동 생성). 업로드 전에는 닫으면 안 됨.
+  const [uploadDone, setUploadDone] = useState(false);
   const [recordingStartedAt, setRecordingStartedAt] = useState(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [result, setResult] = useState(null);
@@ -899,6 +901,7 @@ export default function App() {
     durationForRequest = Math.max(1, Math.round(Number(durationForRequest) || 1));
     setMeetingDurationSeconds(durationForRequest);
     setIsProcessing(true);
+    setUploadDone(false);
     setError("");
     setResult(null);
 
@@ -966,8 +969,9 @@ export default function App() {
         throw new Error(startData.detail || startData.error || "회의록 생성 요청 실패");
       }
 
-      // 업로드 성공 = 서버가 오디오를 받음 → 녹음 유실 위험 해소
+      // 업로드 성공 = 서버가 오디오를 받음 → 이제 닫아도 회의록이 자동 생성됨
       setRecordingSecured(true);
+      setUploadDone(true);
       // 이 잡을 목록/새로고침 재연결용으로 등록하고 화면 소유권을 준다.
       jobId = startData.job_id;
       ownedJobsRef.current.add(jobId);
@@ -1099,14 +1103,15 @@ export default function App() {
     await processMeeting(recordedFile, meetingDurationSeconds || undefined);
   };
 
-  // 녹음 중이거나, 아직 저장 안 된 녹음이 있으면 탭 닫기/새로고침 시 경고
+  // 닫으면 안 되는 상황에서만 탭 닫기/새로고침 경고를 띄운다.
+  // (업로드가 끝나 서버가 처리 중이면 닫아도 회의록이 자동 생성되므로 경고하지 않음)
+  const unsafeToClose =
+    recordingState === "recording" ||
+    recordingState === "paused" ||
+    (isProcessing && !uploadDone) ||
+    (recordedFile && !recordingSecured);
   useEffect(() => {
-    const risky =
-      recordingState === "recording" ||
-      recordingState === "paused" ||
-      isProcessing ||
-      (recordedFile && !recordingSecured);
-    if (!risky) return;
+    if (!unsafeToClose) return;
     const handler = (e) => {
       e.preventDefault();
       e.returnValue = ""; // 브라우저 기본 확인창 표시
@@ -1114,7 +1119,7 @@ export default function App() {
     };
     window.addEventListener("beforeunload", handler);
     return () => window.removeEventListener("beforeunload", handler);
-  }, [recordingState, isProcessing, recordedFile, recordingSecured]);
+  }, [unsafeToClose]);
 
   const resetMeeting = () => {
     // 저장 안 된 녹음이 남아 있으면, 새 회의로 넘어가며 지워지기 전에 한 번 확인
@@ -1347,6 +1352,7 @@ export default function App() {
                   </div>
                 </div>
                 <p className="help">회의록 생성 시 이 위치에 자동 저장됩니다. (부서·등록자·등록일이 함께 기록됩니다)</p>
+                <p className="help" style={{ marginTop: 6 }}>ℹ️ 회의록 요약·전사는 Notion에 계속 보관되지만, <b>녹음 원본 파일은 30일 후 자동으로 삭제</b>됩니다. 원본이 필요하면 <b>‘녹음 파일 내려받기’</b>로 보관해두세요.</p>
               </div>
 
               <div className="field">
@@ -1458,7 +1464,7 @@ export default function App() {
 
           {step === "setup" && <EmptyState />}
           {step === "recording" && <ProgressPanel recordingState={recordingState} />}
-          {step === "result" && <ResultPanel result={result} notes={notes} participants={participants} emails={emails} error={error} isProcessing={isProcessing} processingLogs={processingLogs} durationLabel={displayDuration} elapsedSec={elapsedSec} etaSec={etaSec} onSendEmail={sendEmailAfterMeeting} isSendingEmail={isSendingEmail} manualEmailStatus={manualEmailStatus} onReset={resetMeeting} onBackground={backgroundCurrent} recordedFile={recordedFile} recordingSecured={recordingSecured} onDownloadRecording={downloadRecording} onRetry={retryProcessRecording} />}
+          {step === "result" && <ResultPanel result={result} notes={notes} participants={participants} emails={emails} error={error} isProcessing={isProcessing} processingLogs={processingLogs} durationLabel={displayDuration} elapsedSec={elapsedSec} etaSec={etaSec} onSendEmail={sendEmailAfterMeeting} isSendingEmail={isSendingEmail} manualEmailStatus={manualEmailStatus} onReset={resetMeeting} onBackground={backgroundCurrent} recordedFile={recordedFile} recordingSecured={recordingSecured} onDownloadRecording={downloadRecording} onRetry={retryProcessRecording} uploadDone={uploadDone} />}
         </section>
       </section>
 
@@ -1580,7 +1586,9 @@ function EmptyState() {
 }
 
 function ProgressPanel({ recordingState }) {
-  return <motion.div className="card" initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35 }}><div className="card-inner"><h3 className="h2" style={{ fontSize: 22, marginBottom: 16 }}>실시간 진행</h3><div className="summary-row"><ProgressRow done label="오디오 입력 확인" /><ProgressRow done={recordingState === "recording"} label="회의 음성 녹음 중" /><ProgressRow done={false} label="종료 후 회의록 생성 및 Notion 자동 저장" /></div></div></motion.div>;
+  return <motion.div className="card" initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35 }}><div className="card-inner"><h3 className="h2" style={{ fontSize: 22, marginBottom: 16 }}>실시간 진행</h3>
+    <div className="close-guard close-danger" style={{ marginBottom: 16 }}>🔴 <b>녹음 중이에요.</b> 이 창(탭)을 <b>닫지 마세요.</b> 닫으면 지금까지 녹음이 사라집니다. 회의가 끝나면 <b>‘종료하고 회의록 만들기’</b>를 눌러주세요.</div>
+    <div className="summary-row"><ProgressRow done label="오디오 입력 확인" /><ProgressRow done={recordingState === "recording"} label="회의 음성 녹음 중" /><ProgressRow done={false} label="종료 후 회의록 생성 및 Notion 자동 저장" /></div></div></motion.div>;
 }
 
 function ProgressRow({ done, label }) {
@@ -1875,7 +1883,7 @@ function CopyNotesButton({ notes, meta, className, label = "회의록 복사" })
   );
 }
 
-function ResultPanel({ result, notes, participants, emails, error, isProcessing, processingLogs, durationLabel, elapsedSec = 0, etaSec = 0, onSendEmail, isSendingEmail, manualEmailStatus, onReset, onBackground, recordedFile, recordingSecured, onDownloadRecording, onRetry }) {
+function ResultPanel({ result, notes, participants, emails, error, isProcessing, processingLogs, durationLabel, elapsedSec = 0, etaSec = 0, onSendEmail, isSendingEmail, manualEmailStatus, onReset, onBackground, recordedFile, recordingSecured, onDownloadRecording, onRetry, uploadDone }) {
   const [emailComposerOpen, setEmailComposerOpen] = useState(false);
   const [resultEmailInput, setResultEmailInput] = useState("");
   const [resultEmails, setResultEmails] = useState(emails || []);
@@ -1960,6 +1968,12 @@ function ResultPanel({ result, notes, participants, emails, error, isProcessing,
         </div>
       )}
       {isProcessing && <div className="notice">{durationLabel}짜리 회의를 전사 → 화자 구분 → AI 요약 → Notion 저장 순서로 처리 중입니다. 회의가 길면 몇 분~수십 분 걸릴 수 있어요.</div>}
+      {isProcessing && !uploadDone && (
+        <div className="close-guard close-danger">⛔ <b>업로드 중이에요.</b> 완료될 때까지 이 창을 <b>닫지 마세요.</b> 지금 닫으면 녹음이 서버로 전송되지 않아요.</div>
+      )}
+      {isProcessing && uploadDone && (
+        <div className="close-guard close-ok">✅ <b>업로드 완료! 이제 창을 닫아도 됩니다.</b> 회의록은 서버에서 자동으로 만들어져 <b>회의록 목록·Notion</b>에 저장돼요. 나중에 목록에서 확인하세요.</div>
+      )}
       {isProcessing && etaSec >= 300 && elapsedSec <= etaSec && (
         <div className="notice notice-warn">⏳ 이 회의는 처리에 <b>약 {Math.round(etaSec / 60)}분</b> 정도 걸릴 수 있어요. 기다리기 부담되시면 아래 <b>‘백그라운드로 돌리기’</b>를 누르고 나중에 오른쪽 아래 <b>‘처리 중인 회의’</b> 목록에서 확인하셔도 됩니다.</div>
       )}
@@ -1978,7 +1992,7 @@ function ResultPanel({ result, notes, participants, emails, error, isProcessing,
               백그라운드로 돌리고 새 회의 준비하기
             </button>
           )}
-          <p className="help" style={{ marginTop: 6 }}>화면을 닫거나 새로고침해도 처리는 계속됩니다. 오른쪽 아래에서 진행 상황을 볼 수 있어요.</p>
+          {uploadDone && <p className="help" style={{ marginTop: 6 }}>화면을 닫거나 새로고침해도 처리는 계속됩니다. 오른쪽 아래에서 진행 상황을 볼 수 있어요.</p>}
         </div>
       )}
       {processingLogs?.length > 0 && <ProcessingLog logs={processingLogs} />}

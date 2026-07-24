@@ -12,6 +12,10 @@ STORAGE_DIR = ROOT_DIR / "storage"
 RECORDINGS_DIR.mkdir(exist_ok=True)
 STORAGE_DIR.mkdir(exist_ok=True)
 
+# 녹음 원본 파일 보관 기간(일). 이 기간이 지난 녹음 파일은 자동 삭제된다.
+# (회의록 요약/전사는 Notion·storage 에 계속 보관됨)
+RECORDING_RETENTION_DAYS = int(os.getenv("RECORDING_RETENTION_DAYS", "30"))
+
 SAMPLE_RATE = 16000
 CHANNELS = 1
 

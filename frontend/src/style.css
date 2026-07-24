@@ -118,6 +118,11 @@ button, input, textarea, select { font: inherit; }
 .stats-month-head span { color: var(--accent-strong); font-weight: 700; font-size: 14px; }
 .stats-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
 
+/* 창 닫기 안내 (닫아도 됨 / 닫지 마세요) */
+.close-guard { border-radius: var(--r-sm); padding: 11px 14px; font-size: 13.5px; line-height: 1.55; margin-bottom: 12px; }
+.close-guard.close-danger { background: oklch(96.5% 0.035 25); border: 1.5px solid var(--danger); color: oklch(42% 0.08 28); }
+.close-guard.close-ok { background: oklch(96% 0.05 155); border: 1.5px solid var(--success); color: oklch(38% 0.08 158); }
+
 /* 녹음 저장 실패 구제 안내 */
 .rescue-box { border: 1.5px solid var(--danger); background: oklch(97% 0.03 25); border-radius: var(--r-md); padding: 14px 16px; margin-bottom: 16px; }
 .rescue-title { display: flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 800; color: var(--danger); margin-bottom: 6px; }

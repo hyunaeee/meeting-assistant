@@ -23,6 +23,37 @@ from app.services import diarize as diarize_svc
 from app.services.stt import preload_model, segments_to_text, transcribe_segments
 
 
+def _cleanup_old_recordings() -> int:
+    """보관 기간(기본 30일)이 지난 녹음 원본 파일을 삭제한다. 회의록/전사는 건드리지 않는다."""
+    days = getattr(config, "RECORDING_RETENTION_DAYS", 30)
+    if days <= 0:
+        return 0
+    cutoff = time.time() - days * 86400
+    removed = 0
+    try:
+        for f in config.RECORDINGS_DIR.glob("*"):
+            try:
+                if f.is_file() and f.stat().st_mtime < cutoff:
+                    f.unlink()
+                    removed += 1
+            except Exception:  # noqa: BLE001
+                pass
+    except Exception as exc:  # noqa: BLE001
+        print(f"[cleanup] 녹음 파일 정리 실패: {exc}")
+        return removed
+    if removed:
+        print(f"[cleanup] {days}일 지난 녹음 원본 파일 {removed}개 삭제")
+        _log_event("cleanup", removed=removed, retention_days=days)
+    return removed
+
+
+def _cleanup_loop() -> None:
+    """하루에 한 번 오래된 녹음 파일을 정리한다."""
+    while True:
+        _cleanup_old_recordings()
+        time.sleep(24 * 3600)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # 무거운 모델을 미리 로드해 첫 요청 콜드스타트로 인한 nginx 504 를 방지한다.
@@ -37,6 +68,9 @@ async def lifespan(app: FastAPI):
         print("[startup] Diarization pipeline preloaded.")
     except Exception as exc:  # noqa: BLE001
         print(f"[startup] Diarization preload failed (will fall back to no speakers): {exc}")
+    # 오래된 녹음 파일 정리(시작 시 1회 + 하루 간격)
+    _cleanup_old_recordings()
+    threading.Thread(target=_cleanup_loop, daemon=True).start()
     yield
 
 
