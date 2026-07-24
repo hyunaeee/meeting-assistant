@@ -30,6 +30,7 @@ import {
   BarChart3,
   Check,
   AlertCircle,
+  Copy,
 } from "lucide-react";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
@@ -83,6 +84,70 @@ function saveActiveJobs(jobs) {
   } catch { /* 저장 실패는 무시 */ }
 }
 const sleep = (ms) => new Promise((r) => window.setTimeout(r, ms));
+
+// 회의록 요약을 이모지 붙은 텍스트로 만들어 어디든(카톡·메일·Notion) 붙여넣기 좋게 한다.
+function formatNotesForCopy(notes, meta = {}) {
+  if (!notes) return "";
+  const lines = [];
+  lines.push(`📋 ${notes.title || "회의록"}`);
+  const sub = [meta.department, meta.registrant && `등록자 ${meta.registrant}`, meta.meeting_date]
+    .filter(Boolean)
+    .join("  ·  ");
+  if (sub) lines.push(sub);
+  lines.push("");
+
+  if (notes.summary) {
+    lines.push("📝 요약");
+    lines.push(notes.summary);
+    lines.push("");
+  }
+  const bullets = (emoji, label, items) => {
+    if (!items || !items.length) return;
+    lines.push(`${emoji} ${label}`);
+    items.forEach((it) => lines.push(`  • ${it}`));
+    lines.push("");
+  };
+  bullets("👥", "참석자", notes.attendees);
+  if (notes.agenda && notes.agenda.length) {
+    lines.push("🗂️ 안건");
+    notes.agenda.forEach((a, i) => lines.push(`  ${i + 1}. ${a}`));
+    lines.push("");
+  }
+  bullets("💡", "핵심 논의", notes.key_points);
+  bullets("✅", "결정사항", notes.decisions);
+  if (notes.action_items && notes.action_items.length) {
+    lines.push("📌 액션 아이템");
+    notes.action_items.forEach((it) =>
+      lines.push(`  • ${it.task} (담당: ${it.owner || "미정"} / 기한: ${it.due || "미정"})`)
+    );
+    lines.push("");
+  }
+  bullets("❓", "추가 논의 필요", notes.open_questions);
+  return lines.join("\n").trim();
+}
+
+async function copyText(text) {
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch { /* 아래 폴백으로 */ }
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    const ok = document.execCommand("copy");
+    document.body.removeChild(ta);
+    return ok;
+  } catch {
+    return false;
+  }
+}
 const NEW_LINE = String.fromCharCode(10);
 const CARRIAGE_RETURN = String.fromCharCode(13);
 
@@ -1584,6 +1649,10 @@ function MeetingsListModal({ onClose, currentUser }) {
             <div className="error">{selected.error}</div>
           ) : (
             <div className="stats-scroll" style={{ maxHeight: "66vh" }}>
+              <div className="copy-row">
+                <CopyNotesButton notes={notes} meta={{ department: selected.department, registrant: selected.registrant, meeting_date: selected.meeting_date || selected.upload_date }} className="copy-btn" />
+                <span className="help">카톡·메일·Notion 등 어디든 붙여넣기.</span>
+              </div>
               {sections.map((sec) => sec.items.length > 0 && (
                 <div key={sec.title} className="note-block"><h4>{sec.title}</h4><ul>{sec.items.map((it, i) => <li key={i}>{it}</li>)}</ul></div>
               ))}
@@ -1715,6 +1784,23 @@ function StatsModal({ onClose }) {
   );
 }
 
+// 회의록 요약을 클립보드에 복사하는 버튼 (카톡·메일·Notion 등 어디든 붙여넣기용)
+function CopyNotesButton({ notes, meta, className, label = "회의록 복사" }) {
+  const [copied, setCopied] = useState(false);
+  const onCopy = async () => {
+    const ok = await copyText(formatNotesForCopy(notes, meta));
+    setCopied(ok ? "ok" : "fail");
+    window.setTimeout(() => setCopied(false), 2200);
+  };
+  return (
+    <button className={className || "outline-btn"} type="button" onClick={onCopy} disabled={!notes}>
+      {copied === "ok" ? <><Check size={18} /> 복사됐어요! 붙여넣기 하세요</>
+        : copied === "fail" ? <><AlertCircle size={18} /> 복사 실패</>
+        : <><Copy size={18} /> {label}</>}
+    </button>
+  );
+}
+
 function ResultPanel({ result, notes, participants, emails, error, isProcessing, processingLogs, durationLabel, elapsedSec = 0, etaSec = 0, onSendEmail, isSendingEmail, manualEmailStatus, onReset, onBackground }) {
   const [emailComposerOpen, setEmailComposerOpen] = useState(false);
   const [resultEmailInput, setResultEmailInput] = useState("");
@@ -1790,11 +1876,17 @@ function ResultPanel({ result, notes, participants, emails, error, isProcessing,
     <div className="card"><div className="card-inner"><div className="section-title"><div><h3>회의 요약</h3><p>{durationLabel}짜리 회의 요약입니다. 회의록 생성 후 Notion에 자동 저장됩니다.</p></div><ListChecks size={24} color="#64748b" /></div>
       <div className="summary-scroll">
       {isProcessing && <div className="notice">{durationLabel}짜리 회의를 전사 → 화자 구분 → AI 요약 → Notion 저장 순서로 처리 중입니다. 회의가 길면 몇 분~수십 분 걸릴 수 있어요.</div>}
+      {isProcessing && etaSec >= 300 && elapsedSec <= etaSec && (
+        <div className="notice notice-warn">⏳ 이 회의는 처리에 <b>약 {Math.round(etaSec / 60)}분</b> 정도 걸릴 수 있어요. 기다리기 부담되시면 아래 <b>‘백그라운드로 돌리기’</b>를 누르고 나중에 오른쪽 아래 <b>‘처리 중인 회의’</b> 목록에서 확인하셔도 됩니다.</div>
+      )}
+      {isProcessing && etaSec > 0 && elapsedSec > etaSec && (
+        <div className="notice notice-warn">예상 시간을 넘겼지만 <b>계속 정상 처리 중</b>이에요. 조금만 더 기다리거나, 아래 <b>‘백그라운드로 돌리기’</b>를 눌러 두고 완료되면 오른쪽 아래 목록에서 확인하세요.</div>
+      )}
       {isProcessing && (
         <div className="progress-meter">
           <div className="progress-meter-head">
             <span><Loader2 size={14} className="process-spin" /> 경과 {Math.floor(elapsedSec / 60)}:{String(elapsedSec % 60).padStart(2, "0")}</span>
-            {etaSec > 0 && <span>예상 약 {Math.max(1, Math.round(etaSec / 60))}분</span>}
+            {etaSec > 0 && <span>{elapsedSec > etaSec ? "예상 시간 초과 · 처리 중" : `예상 약 ${Math.max(1, Math.round(etaSec / 60))}분`}</span>}
           </div>
           <div className="progress-bar"><div style={{ width: `${etaSec ? Math.min(99, Math.round((elapsedSec / etaSec) * 100)) : 5}%` }} /></div>
           {onBackground && (
@@ -1807,6 +1899,12 @@ function ResultPanel({ result, notes, participants, emails, error, isProcessing,
       )}
       {processingLogs?.length > 0 && <ProcessingLog logs={processingLogs} />}
       {!isProcessing && !notes && <div className="notice">아직 생성된 회의록이 없습니다.</div>}
+      {!isProcessing && notes && (
+        <div className="copy-row">
+          <CopyNotesButton notes={notes} meta={{ department: result?.department, registrant: result?.registrant, meeting_date: result?.meeting_date }} className="copy-btn" />
+          <span className="help">카톡·메일·Notion 등 어디든 붙여넣을 수 있어요.</span>
+        </div>
+      )}
       {sections.map((section) => section.items.length > 0 && <div key={section.title} className="note-block"><h4>{section.title}</h4><ul>{section.items.map((item) => <li key={item}>{item}</li>)}</ul></div>)}
       {notes?.action_items?.length > 0 && <div className="note-block"><h4>액션 아이템</h4><ul>{notes.action_items.map((item, idx) => <li key={idx}>{item.task} (담당: {item.owner || "미정"} / 기한: {item.due || "미정"})</li>)}</ul></div>}
       {result?.notion_url && <div className="success">Notion 자동 저장 완료: <a href={result.notion_url} target="_blank" rel="noreferrer">열기 <ExternalLink size={13} /></a></div>}
