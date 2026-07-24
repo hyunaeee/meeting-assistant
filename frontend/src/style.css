@@ -118,6 +118,13 @@ button, input, textarea, select { font: inherit; }
 .stats-month-head span { color: var(--accent-strong); font-weight: 700; font-size: 14px; }
 .stats-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
 
+/* 녹음 저장 실패 구제 안내 */
+.rescue-box { border: 1.5px solid var(--danger); background: oklch(97% 0.03 25); border-radius: var(--r-md); padding: 14px 16px; margin-bottom: 16px; }
+.rescue-title { display: flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 800; color: var(--danger); margin-bottom: 6px; }
+.rescue-text { font-size: 13px; color: var(--foreground); line-height: 1.6; margin: 0 0 12px; }
+.rescue-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+.rescue-actions .bg-job-view { display: inline-flex; align-items: center; gap: 6px; padding: 9px 15px; font-size: 14px; }
+
 /* 오래 걸림 안내 */
 .notice.notice-warn { background: oklch(97.5% 0.03 85); border: 1px solid oklch(85% 0.09 85); color: oklch(40% 0.06 60); }
 

@@ -259,6 +259,9 @@ export default function App() {
   const [selectedSource, setSelectedSource] = useState("mic");
   const [selectedFile, setSelectedFile] = useState(null);
   const [recordedFile, setRecordedFile] = useState(null);
+  // 녹음이 서버에 업로드됐거나(=안전) 사용자가 파일로 내려받았는지 여부.
+  // false 이면 녹음이 아직 이 브라우저 메모리에만 있어 유실 위험이 있음.
+  const [recordingSecured, setRecordingSecured] = useState(false);
   const [recordingStartedAt, setRecordingStartedAt] = useState(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [result, setResult] = useState(null);
@@ -608,6 +611,7 @@ export default function App() {
     setError("");
     setResult(null);
     setRecordedFile(null);
+    setRecordingSecured(false);
     setMeetingDurationSeconds(0);
     recordingStartedAtRef.current = null;
     setManualEmailStatus("");
@@ -653,15 +657,30 @@ export default function App() {
       };
 
       recorder.onerror = () => {
-        setError("녹음 중 오류가 발생했습니다. 오디오 파일 업로드 방식으로 다시 시도해주세요.");
         stopActiveStream();
+        // 오류 전까지 녹음된 부분이라도 살려서 내려받을 수 있게 보관
+        const chunks = recordedChunksRef.current;
+        if (chunks && chunks.length) {
+          const type = chunks[0]?.type || mimeType || "audio/webm";
+          const extension = type.includes("ogg") ? "ogg" : type.includes("mp4") ? "mp4" : "webm";
+          try {
+            const file = new File([new Blob(chunks, { type })], "browser-recording." + extension, { type });
+            setRecordedFile(file);
+            setRecordingSecured(false);
+          } catch { /* 무시 */ }
+          setError("녹음 중 오류가 발생했어요. 지금까지 녹음된 부분은 아래 ‘녹음 파일 내려받기’로 저장할 수 있습니다.");
+        } else {
+          setError("녹음 중 오류가 발생했습니다. 오디오 파일 업로드 방식으로 다시 시도해주세요.");
+        }
+        setRecordingState("finished");
+        setStep("result");
       };
 
       recorder.onstop = async () => {
         stopActiveStream();
         const chunks = recordedChunksRef.current;
         if (!chunks.length) {
-          setError("녹음된 오디오가 없습니다. 브라우저 권한과 오디오 입력을 확인해주세요.");
+          setError("녹음된 오디오가 없습니다. 마이크 권한과 오디오 입력을 확인한 뒤 다시 녹음해주세요. (이번 녹음은 저장되지 않았습니다)");
           setRecordingState("finished");
           setStep("result");
           return;
@@ -674,7 +693,9 @@ export default function App() {
         const blob = new Blob(chunks, { type });
         const extension = type.includes("ogg") ? "ogg" : type.includes("mp4") ? "mp4" : "webm";
         const file = new File([blob], "browser-recording." + extension, { type });
+        // 녹음본을 먼저 확보(상태에 보관) → 업로드가 실패해도 다운로드/재시도 가능
         setRecordedFile(file);
+        setRecordingSecured(false);
         setRecordingState("finished");
         setStep("result");
         await processMeeting(file, durationSeconds);
@@ -945,6 +966,8 @@ export default function App() {
         throw new Error(startData.detail || startData.error || "회의록 생성 요청 실패");
       }
 
+      // 업로드 성공 = 서버가 오디오를 받음 → 녹음 유실 위험 해소
+      setRecordingSecured(true);
       // 이 잡을 목록/새로고침 재연결용으로 등록하고 화면 소유권을 준다.
       jobId = startData.job_id;
       ownedJobsRef.current.add(jobId);
@@ -1049,7 +1072,56 @@ export default function App() {
   };
 
 
+  // 녹음 파일을 사용자 컴퓨터로 내려받아 안전하게 보관 (업로드와 무관한 백업)
+  const downloadRecording = () => {
+    if (!recordedFile) return;
+    try {
+      const url = URL.createObjectURL(recordedFile);
+      const a = document.createElement("a");
+      a.href = url;
+      const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, "-");
+      const ext = (recordedFile.name && recordedFile.name.split(".").pop()) || "webm";
+      a.download = `회의녹음-${stamp}.${ext}`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 5000);
+      setRecordingSecured(true); // 로컬 백업 확보
+    } catch (err) {
+      setError("녹음 파일 내려받기에 실패했습니다: " + (err.message || err));
+    }
+  };
+
+  // 업로드/생성 실패 후, 보관된 녹음으로 다시 시도
+  const retryProcessRecording = async () => {
+    if (!recordedFile) return;
+    setError("");
+    await processMeeting(recordedFile, meetingDurationSeconds || undefined);
+  };
+
+  // 녹음 중이거나, 아직 저장 안 된 녹음이 있으면 탭 닫기/새로고침 시 경고
+  useEffect(() => {
+    const risky =
+      recordingState === "recording" ||
+      recordingState === "paused" ||
+      isProcessing ||
+      (recordedFile && !recordingSecured);
+    if (!risky) return;
+    const handler = (e) => {
+      e.preventDefault();
+      e.returnValue = ""; // 브라우저 기본 확인창 표시
+      return "";
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [recordingState, isProcessing, recordedFile, recordingSecured]);
+
   const resetMeeting = () => {
+    // 저장 안 된 녹음이 남아 있으면, 새 회의로 넘어가며 지워지기 전에 한 번 확인
+    if (recordedFile && !recordingSecured) {
+      const ok = window.confirm("아직 저장되지 않은 녹음이 있어요. 새 회의를 시작하면 이 녹음은 사라집니다.\n\n먼저 '녹음 파일 내려받기'로 백업하는 걸 권장합니다. 그래도 새로 시작할까요?");
+      if (!ok) return;
+    }
     setStep("setup");
     setRecordingState("idle");
     setMeetingTitle("");
@@ -1059,6 +1131,7 @@ export default function App() {
     setEmails([]);
     setSelectedFile(null);
     setRecordedFile(null);
+    setRecordingSecured(false);
     setRecordingStartedAt(null);
     recordingStartedAtRef.current = null;
     setMeetingDurationSeconds(0);
@@ -1370,6 +1443,7 @@ export default function App() {
                   {recordingState === "recording" && <button className="secondary" onClick={pauseRecording}><Pause size={18} /> 일시정지</button>}
                   {recordingState === "paused" && <button className="primary" onClick={resumeRecording}><Play size={18} /> 다시 시작</button>}
                   {(recordingState === "recording" || recordingState === "paused") && <button className="danger" onClick={finishRecording} disabled={isProcessing}><Square size={18} /> 종료하고 회의록 만들기</button>}
+                  {recordedFile && <button className="secondary" type="button" onClick={downloadRecording}><Save size={18} /> 녹음 파일 내려받기{!recordingSecured ? " (백업)" : ""}</button>}
                   {recordingState === "finished" && <button className="secondary" onClick={resetMeeting}><RotateCcw size={18} /> 새 회의 시작</button>}
                   {recordingState !== "recording" && recordingState !== "paused" && (!selectedDepartment || !registrant.trim()) && (
                     <p className="help" style={{ flexBasis: "100%", margin: 0, color: "var(--accent-strong)", fontWeight: 600 }}>
@@ -1384,7 +1458,7 @@ export default function App() {
 
           {step === "setup" && <EmptyState />}
           {step === "recording" && <ProgressPanel recordingState={recordingState} />}
-          {step === "result" && <ResultPanel result={result} notes={notes} participants={participants} emails={emails} error={error} isProcessing={isProcessing} processingLogs={processingLogs} durationLabel={displayDuration} elapsedSec={elapsedSec} etaSec={etaSec} onSendEmail={sendEmailAfterMeeting} isSendingEmail={isSendingEmail} manualEmailStatus={manualEmailStatus} onReset={resetMeeting} onBackground={backgroundCurrent} />}
+          {step === "result" && <ResultPanel result={result} notes={notes} participants={participants} emails={emails} error={error} isProcessing={isProcessing} processingLogs={processingLogs} durationLabel={displayDuration} elapsedSec={elapsedSec} etaSec={etaSec} onSendEmail={sendEmailAfterMeeting} isSendingEmail={isSendingEmail} manualEmailStatus={manualEmailStatus} onReset={resetMeeting} onBackground={backgroundCurrent} recordedFile={recordedFile} recordingSecured={recordingSecured} onDownloadRecording={downloadRecording} onRetry={retryProcessRecording} />}
         </section>
       </section>
 
@@ -1801,7 +1875,7 @@ function CopyNotesButton({ notes, meta, className, label = "회의록 복사" })
   );
 }
 
-function ResultPanel({ result, notes, participants, emails, error, isProcessing, processingLogs, durationLabel, elapsedSec = 0, etaSec = 0, onSendEmail, isSendingEmail, manualEmailStatus, onReset, onBackground }) {
+function ResultPanel({ result, notes, participants, emails, error, isProcessing, processingLogs, durationLabel, elapsedSec = 0, etaSec = 0, onSendEmail, isSendingEmail, manualEmailStatus, onReset, onBackground, recordedFile, recordingSecured, onDownloadRecording, onRetry }) {
   const [emailComposerOpen, setEmailComposerOpen] = useState(false);
   const [resultEmailInput, setResultEmailInput] = useState("");
   const [resultEmails, setResultEmails] = useState(emails || []);
@@ -1875,6 +1949,16 @@ function ResultPanel({ result, notes, participants, emails, error, isProcessing,
   return <motion.div className="result-grid" initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35 }}>
     <div className="card"><div className="card-inner"><div className="section-title"><div><h3>회의 요약</h3><p>{durationLabel}짜리 회의 요약입니다. 회의록 생성 후 Notion에 자동 저장됩니다.</p></div><ListChecks size={24} color="#64748b" /></div>
       <div className="summary-scroll">
+      {!isProcessing && recordedFile && !recordingSecured && (
+        <div className="rescue-box">
+          <div className="rescue-title"><AlertCircle size={18} /> 회의록 저장이 안 됐어요 — 녹음은 아직 안전합니다</div>
+          <p className="rescue-text">서버로 업로드하지 못했지만 <b>이번 녹음은 이 화면에 그대로 남아 있습니다.</b> 아래 <b>‘녹음 파일 내려받기’</b>로 먼저 백업한 뒤 다시 시도해주세요. 화면을 닫거나 새로고침하면 녹음이 사라질 수 있어요.</p>
+          <div className="rescue-actions">
+            <button className="copy-btn" type="button" onClick={onDownloadRecording}><Save size={18} /> 녹음 파일 내려받기 (백업)</button>
+            <button className="bg-job-view" type="button" onClick={onRetry}><RotateCcw size={16} /> 다시 시도</button>
+          </div>
+        </div>
+      )}
       {isProcessing && <div className="notice">{durationLabel}짜리 회의를 전사 → 화자 구분 → AI 요약 → Notion 저장 순서로 처리 중입니다. 회의가 길면 몇 분~수십 분 걸릴 수 있어요.</div>}
       {isProcessing && etaSec >= 300 && elapsedSec <= etaSec && (
         <div className="notice notice-warn">⏳ 이 회의는 처리에 <b>약 {Math.round(etaSec / 60)}분</b> 정도 걸릴 수 있어요. 기다리기 부담되시면 아래 <b>‘백그라운드로 돌리기’</b>를 누르고 나중에 오른쪽 아래 <b>‘처리 중인 회의’</b> 목록에서 확인하셔도 됩니다.</div>
